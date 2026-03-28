@@ -13,6 +13,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from auth import TokenData, decode_token, get_current_user, require_donor, require_ngo, require_verifier
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
+from analytics.lava_client import LavaClient
+from analytics.cached_lava import get_cached_vault_transactions, get_cached_vault_stats
 from models import (
     Campaign,
     CreateCampaignRequest,
@@ -43,13 +45,18 @@ app.add_middleware(
 # DB client
 mongo_client: AsyncIOMotorClient = None
 db = None
+lava_client: Optional[LavaClient] = None
 
 
 @app.on_event("startup")
 async def startup():
-    global mongo_client, db
+    global mongo_client, db, lava_client
     mongo_client = AsyncIOMotorClient(MONGO_URL)
     db = mongo_client[DB_NAME]
+    try:
+        lava_client = LavaClient()
+    except RuntimeError as e:
+        print(f"[Startup] WARNING: {e} — Lava analytics disabled.")
 
 
 @app.on_event("shutdown")
@@ -68,7 +75,29 @@ def serialize(doc: dict) -> dict:
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    # Lava check
+    lava_status = "degraded"
+    if lava_client:
+        try:
+            ok = await lava_client.health_check()
+            lava_status = "ok" if ok else "degraded"
+        except Exception:
+            pass
+
+    # Mongo check
+    mongo_status = "degraded"
+    try:
+        await db.command("ping")
+        mongo_status = "ok"
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "lava": lava_status,
+        "mongo": mongo_status,
+    }
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────────
@@ -299,23 +328,6 @@ async def get_verification_queue(user: TokenData = Depends(require_verifier)):
 
 # ─── Analytics ───────────────────────────────────────────────────────────────
 
-@app.get("/api/analytics/platform")
-async def platform_analytics(user: TokenData = Depends(get_current_user)):
-    total_campaigns = await db.campaigns.count_documents({})
-    active_campaigns = await db.campaigns.count_documents({"status": "active"})
-    total_donations_cursor = db.donations.aggregate([
-        {"$group": {"_id": None, "total": {"$sum": "$amount_sol"}, "released": {"$sum": "$released_sol"}}}
-    ])
-    agg = await total_donations_cursor.to_list(1)
-    totals = agg[0] if agg else {"total": 0, "released": 0}
-    return {
-        "total_campaigns": total_campaigns,
-        "active_campaigns": active_campaigns,
-        "total_raised_sol": totals.get("total", 0),
-        "total_released_sol": totals.get("released", 0),
-    }
-
-
 @app.get("/api/analytics/ngo")
 async def ngo_analytics(user: TokenData = Depends(require_ngo)):
     ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
@@ -518,14 +530,101 @@ async def platform_analytics(user: TokenData = Depends(get_current_user)):
         "created_at": {"$gte": today_start},
     })
 
+    # Live Lava balance sum for active vaults
+    lava_status = "degraded"
+    live_locked_sol = d.get("locked", 0.0)
+    if lava_client:
+        try:
+            active_vaults = []
+            async for c in db.campaigns.find(
+                {"status": "active", "vault_address": {"$exists": True, "$ne": None}}
+            ):
+                va = c.get("vault_address")
+                if va:
+                    active_vaults.append(va)
+
+            if active_vaults:
+                balances = 0.0
+                for va in active_vaults:
+                    balances += await lava_client.get_balance(va)
+                live_locked_sol = round(balances, 9)
+
+            ok = await lava_client.health_check()
+            lava_status = "ok" if ok else "degraded"
+        except Exception:
+            pass
+
     return {
         "total_raised_sol":      d.get("raised", 0.0),
         "total_released_sol":    d.get("released", 0.0),
-        "total_locked_sol":      d.get("locked", 0.0),
+        "total_locked_sol":      live_locked_sol,
         "campaigns_active":      campaigns_active,
         "campaigns_completed":   campaigns_completed,
         "milestones_approved":   milestones_approved,
         "milestones_rejected":   milestones_rejected,
         "avg_confidence_score":  avg_confidence,
         "agent_decisions_today": decisions_today,
+        "lava_status":           lava_status,
     }
+
+
+# ─── Vault Analytics (Lava) ──────────────────────────────────────────────────
+
+@app.get("/api/analytics/vault/{campaign_id}")
+async def vault_transactions(
+    campaign_id: str,
+    user: TokenData = Depends(get_current_user),
+):
+    """Transaction history for a campaign's on-chain vault."""
+    if not ObjectId.is_valid(campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    campaign = await db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    vault_address = campaign.get("vault_address")
+    if not vault_address:
+        raise HTTPException(status_code=422, detail="Campaign has no vault_address")
+
+    if not lava_client:
+        raise HTTPException(status_code=503, detail="Lava analytics not configured")
+
+    transactions = await get_cached_vault_transactions(vault_address, lava_client, db)
+    return {"vault_address": vault_address, "transactions": transactions}
+
+
+@app.get("/api/analytics/vault/{campaign_id}/stats")
+async def vault_stats(
+    campaign_id: str,
+    user: TokenData = Depends(get_current_user),
+):
+    """Aggregated on-chain stats for a campaign vault."""
+    if not ObjectId.is_valid(campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    campaign = await db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    vault_address = campaign.get("vault_address")
+    if not vault_address:
+        raise HTTPException(status_code=422, detail="Campaign has no vault_address")
+
+    if not lava_client:
+        raise HTTPException(status_code=503, detail="Lava analytics not configured")
+
+    stats = await get_cached_vault_stats(vault_address, lava_client, db)
+    return stats
+
+
+@app.get("/api/analytics/address/{wallet_address}")
+async def address_transactions(wallet_address: str):
+    """
+    Public endpoint — no auth required.
+    Returns on-chain transaction history for any wallet address.
+    Useful for donors verifying their own activity.
+    """
+    if not lava_client:
+        raise HTTPException(status_code=503, detail="Lava analytics not configured")
+
+    transactions = await lava_client.get_vault_transactions(wallet_address, limit=20)
+    return {"wallet_address": wallet_address, "transactions": transactions}
