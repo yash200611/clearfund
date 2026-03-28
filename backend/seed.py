@@ -2,7 +2,9 @@
 ClearFund Seed Script
 Run with: python seed.py
 
-Seeds test users, campaigns, milestones, and donations.
+Seeds campaigns and milestones only.
+All SOL amounts start at 0 — real on-chain activity drives the numbers.
+No fake donations, no fake transaction IDs.
 Uses upsert logic — safe to run multiple times without duplicates.
 """
 
@@ -18,7 +20,7 @@ load_dotenv()
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "clearfund")
 
-# Devnet vault address (Phase 0 keypair)
+# Real devnet vault address — fund with: solana airdrop 2 <address> --url devnet
 VAULT_ADDRESS = "2hdLtoGgxfbxqgrVFqNiAy7G14LDyd4ePPHvV8Ti16Vo"
 
 NOW = datetime.now(timezone.utc)
@@ -30,389 +32,250 @@ async def seed():
 
     print(f"[Seed] Connected to {DB_NAME}")
 
-    # ── Users ────────────────────────────────────────────────────────────────
-    users_data = [
-        {
-            "email": "donor@clearfund.app",
-            "role": "donor",
-            "auth0_sub": "seed|donor",
-            "privy_wallet_id": None,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "created_at": NOW,
-        },
-        {
+    # ── NGO user (placeholder — gets replaced when real user logs in via Auth0)
+    ngo = await db.users.find_one({"role": "ngo"})
+    if not ngo:
+        result = await db.users.insert_one({
             "email": "ngo@clearfund.app",
             "role": "ngo",
             "auth0_sub": "seed|ngo",
             "privy_wallet_id": None,
-            "wallet_address": "NgoWa11etAddressFakeForSeedData222222222222",
-            "created_at": NOW,
-        },
-        {
-            "email": "admin@clearfund.app",
-            "role": "admin",
-            "auth0_sub": "seed|admin",
-            "privy_wallet_id": None,
             "wallet_address": None,
             "created_at": NOW,
-        },
-    ]
+        })
+        ngo_id = str(result.inserted_id)
+        print("  [User] ngo@clearfund.app — inserted")
+    else:
+        ngo_id = str(ngo["_id"])
+        print("  [User] ngo@clearfund.app — exists")
 
-    user_ids = {}
-    for u in users_data:
-        result = await db.users.update_one(
-            {"auth0_sub": u["auth0_sub"]},
-            {"$setOnInsert": u},
-            upsert=True,
-        )
-        doc = await db.users.find_one({"auth0_sub": u["auth0_sub"]})
-        user_ids[u["role"]] = str(doc["_id"])
-        action = "inserted" if result.upserted_id else "exists"
-        print(f"  [User] {u['email']} ({u['role']}) — {action}")
-
-    ngo_id = user_ids["ngo"]
-    donor_id = user_ids["donor"]
-
-    # ── Campaigns ────────────────────────────────────────────────────────────
+    # ── Campaigns ─────────────────────────────────────────────────────────────
     campaigns_data = [
         {
             "slug": "rural-health-van",
-            "ngo_id": ngo_id,
             "title": "Rural Health Van Project",
-            "description": "Deploying mobile medical units to underserved rural communities in Maharashtra.",
+            "description": (
+                "Deploying 3 mobile medical units to underserved rural communities "
+                "in Maharashtra, India. Each van serves 5 villages per week, providing "
+                "free consultations, diagnostics, and essential medicines to over "
+                "15,000 people who have no access to healthcare facilities."
+            ),
             "category": "Healthcare",
-            "total_raised_sol": 45.0,
+            "target_sol": 45.0,
             "vault_address": VAULT_ADDRESS,
             "ngo_name": "HealthForAll Foundation",
-            "status": "active",
-            "trust_score": 82.0,
-            "failure_count": 0,
-            "created_at": NOW - timedelta(days=60),
+            "milestones": [
+                {
+                    "title": "Vehicle Purchase & Outfitting",
+                    "description": (
+                        "Purchase 3 second-hand ambulance-grade vans and outfit each "
+                        "with a medical examination table, basic diagnostic equipment "
+                        "(BP monitor, glucometer, pulse oximeter), a refrigeration unit "
+                        "for vaccines, and first aid supplies."
+                    ),
+                    "amount_sol": 18.0,
+                    "due_date": "2025-06-30",
+                },
+                {
+                    "title": "Medical Staff Training",
+                    "description": (
+                        "Train 12 paramedics and 3 supervising doctors in mobile clinic "
+                        "operations, rural triage protocols, and telemedicine. Includes "
+                        "a 2-week intensive program run by Apollo Hospital volunteers."
+                    ),
+                    "amount_sol": 12.0,
+                    "due_date": "2025-08-31",
+                },
+                {
+                    "title": "First 90-Day Deployment",
+                    "description": (
+                        "Launch operations across 15 target villages. Track patient "
+                        "visits, diagnoses, and referrals. Provide monthly public "
+                        "impact reports with photo evidence submitted on-chain."
+                    ),
+                    "amount_sol": 15.0,
+                    "due_date": "2025-11-30",
+                },
+            ],
         },
         {
             "slug": "solar-water-pumps",
-            "ngo_id": ngo_id,
             "title": "Solar Water Pumps Initiative",
-            "description": "Installing solar-powered water pumps in drought-affected villages.",
+            "description": (
+                "Installing solar-powered water pumps in 20 drought-affected villages "
+                "in Rajasthan. Each pump replaces 4-6 hours of daily manual water "
+                "collection, freeing women and children to attend school and work. "
+                "Covers installation, maintenance training, and 1-year warranty support."
+            ),
             "category": "Water & Sanitation",
-            "total_raised_sol": 30.0,
+            "target_sol": 30.0,
             "vault_address": VAULT_ADDRESS,
             "ngo_name": "CleanWaterNow",
-            "status": "active",
-            "trust_score": 70.0,
-            "failure_count": 0,
-            "created_at": NOW - timedelta(days=45),
+            "milestones": [
+                {
+                    "title": "Equipment Procurement & Import",
+                    "description": (
+                        "Source and import 20 high-efficiency solar pump kits from "
+                        "certified manufacturers. Each kit includes solar panels, "
+                        "submersible pump, controller, and 500L storage tank. "
+                        "Delivery receipts and import docs submitted as evidence."
+                    ),
+                    "amount_sol": 15.0,
+                    "due_date": "2025-07-31",
+                },
+                {
+                    "title": "Installation & Community Training",
+                    "description": (
+                        "Install all 20 pumps with local contractor teams. Train 2 "
+                        "community members per village in basic maintenance. Final "
+                        "milestone evidence: geotagged installation photos and signed "
+                        "community handover certificates."
+                    ),
+                    "amount_sol": 15.0,
+                    "due_date": "2025-09-30",
+                },
+            ],
         },
         {
             "slug": "womens-shelter",
-            "ngo_id": ngo_id,
             "title": "Women's Shelter Renovation",
-            "description": "Renovating and furnishing a shelter for survivors of domestic violence.",
+            "description": (
+                "Renovating a 3,000 sq ft building in Chennai to serve as a full-time "
+                "shelter for survivors of domestic violence. Will house 40 women and "
+                "children with private rooms, a counselling centre, a skills training "
+                "workshop, and a safe play area for children."
+            ),
             "category": "Social Services",
-            "total_raised_sol": 25.0,
+            "target_sol": 25.0,
             "vault_address": VAULT_ADDRESS,
             "ngo_name": "SafeHaven Trust",
-            "status": "active",
-            "trust_score": 75.0,
-            "failure_count": 0,
-            "created_at": NOW - timedelta(days=30),
+            "milestones": [
+                {
+                    "title": "Structural Renovation & Materials",
+                    "description": (
+                        "Complete all structural work: roof repair, waterproofing, "
+                        "electrical rewiring, plumbing, and partition walls for private "
+                        "rooms. Evidence: contractor invoices, before/after photos "
+                        "with timestamps."
+                    ),
+                    "amount_sol": 10.0,
+                    "due_date": "2025-06-30",
+                },
+                {
+                    "title": "Interior Fit-Out & Furnishing",
+                    "description": (
+                        "Install beds, mattresses, wardrobes, kitchen appliances, "
+                        "counselling room furniture, and children's play equipment. "
+                        "Evidence: purchase receipts and installation photos."
+                    ),
+                    "amount_sol": 10.0,
+                    "due_date": "2025-08-31",
+                },
+                {
+                    "title": "Shelter Launch & First Month Operations",
+                    "description": (
+                        "Open shelter to residents. Provide evidence of first cohort "
+                        "admitted (anonymised), staff hired, and first month operations "
+                        "report signed by a certified social worker."
+                    ),
+                    "amount_sol": 5.0,
+                    "due_date": "2025-10-31",
+                },
+            ],
         },
         {
             "slug": "youth-stem-lab",
-            "ngo_id": ngo_id,
             "title": "Youth STEM Lab",
-            "description": "Equipping a STEM lab for underprivileged youth to learn coding and robotics.",
+            "description": (
+                "Equipping a fully functional STEM lab for 200 underprivileged youth "
+                "aged 12-18 in Bengaluru. The lab will run weekend coding, robotics, "
+                "and electronics workshops taught by volunteer engineers from local "
+                "tech companies. Goal: 50 students placed in tech internships by year 2."
+            ),
             "category": "Education",
-            "total_raised_sol": 20.0,
+            "target_sol": 20.0,
             "vault_address": VAULT_ADDRESS,
             "ngo_name": "EduFuture",
-            "status": "active",
-            "trust_score": 68.0,
-            "failure_count": 0,
-            "created_at": NOW - timedelta(days=20),
+            "milestones": [
+                {
+                    "title": "Lab Equipment & Setup",
+                    "description": (
+                        "Purchase 20 laptops, 10 Arduino/Raspberry Pi robotics kits, "
+                        "a 3D printer, networking equipment, and lab furniture. "
+                        "Evidence: purchase receipts, delivery photos, and lab "
+                        "readiness sign-off from EduFuture director."
+                    ),
+                    "amount_sol": 12.0,
+                    "due_date": "2025-07-31",
+                },
+                {
+                    "title": "Launch Cohort & First 3-Month Program",
+                    "description": (
+                        "Enrol first cohort of 50 students. Run 12-week program with "
+                        "weekly sessions. Evidence: attendance registers, student "
+                        "project photos, and end-of-cohort demo day video."
+                    ),
+                    "amount_sol": 8.0,
+                    "due_date": "2025-10-31",
+                },
+            ],
         },
     ]
 
-    campaign_ids = {}
     for c in campaigns_data:
         slug = c.pop("slug")
+        milestones_def = c.pop("milestones")
+
+        campaign_doc = {
+            "ngo_id": ngo_id,
+            "title": c["title"],
+            "description": c["description"],
+            "category": c["category"],
+            "target_sol": c["target_sol"],
+            "total_raised_sol": 0.0,
+            "vault_address": c["vault_address"],
+            "ngo_name": c["ngo_name"],
+            "status": "active",
+            "trust_score": 0.0,
+            "failure_count": 0,
+            "created_at": NOW - timedelta(days=7),
+        }
+
         result = await db.campaigns.update_one(
             {"title": c["title"]},
-            {"$setOnInsert": c},
+            {"$setOnInsert": campaign_doc},
             upsert=True,
         )
-        doc = await db.campaigns.find_one({"title": c["title"]})
-        campaign_ids[slug] = str(doc["_id"])
+        campaign_doc_db = await db.campaigns.find_one({"title": c["title"]})
+        campaign_id = str(campaign_doc_db["_id"])
         action = "inserted" if result.upserted_id else "exists"
         print(f"  [Campaign] {c['title']} — {action}")
 
-    # ── Milestones ────────────────────────────────────────────────────────────
-    milestones_data = [
-        # Rural Health Van
-        {
-            "campaign_slug": "rural-health-van",
-            "title": "Vehicle Purchase",
-            "description": "Purchased 3 mobile medical vans",
-            "amount_sol": 18.0,
-            "due_date": "2025-03-31",
-            "status": "released",
-            "evidence_urls": [],
-            "ai_decision": {"confidence_score": 87, "recommendation": "approve"},
-            "oracle_result": {"verdict": "approved", "reason": "Evidence verified"},
-            "solana_tx": "demo_tx_1",
-            "released_at": NOW - timedelta(days=40),
-            "created_at": NOW - timedelta(days=55),
-        },
-        {
-            "campaign_slug": "rural-health-van",
-            "title": "Staff Training",
-            "description": "Trained 12 paramedics for mobile clinic operations",
-            "amount_sol": 12.0,
-            "due_date": "2025-05-31",
-            "status": "submitted",
-            "evidence_urls": ["https://picsum.photos/800/600?random=1"],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=10),
-        },
-        {
-            "campaign_slug": "rural-health-van",
-            "title": "First Deployment",
-            "description": "Begin operations in 5 target villages",
-            "amount_sol": 15.0,
-            "due_date": "2025-07-31",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=5),
-        },
-        # Solar Water Pumps
-        {
-            "campaign_slug": "solar-water-pumps",
-            "title": "Equipment Import",
-            "description": "Import solar pumps and installation materials",
-            "amount_sol": 15.0,
-            "due_date": "2025-06-30",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=40),
-        },
-        {
-            "campaign_slug": "solar-water-pumps",
-            "title": "Installation",
-            "description": "Install pumps in 20 villages",
-            "amount_sol": 15.0,
-            "due_date": "2025-08-31",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=38),
-        },
-        # Women's Shelter
-        {
-            "campaign_slug": "womens-shelter",
-            "title": "Materials",
-            "description": "Purchase construction materials",
-            "amount_sol": 10.0,
-            "due_date": "2025-02-28",
-            "status": "released",
-            "evidence_urls": [],
-            "ai_decision": {"confidence_score": 79, "recommendation": "approve"},
-            "oracle_result": {"verdict": "approved", "reason": "Evidence verified"},
-            "solana_tx": "demo_tx_2",
-            "released_at": NOW - timedelta(days=20),
-            "created_at": NOW - timedelta(days=28),
-        },
-        {
-            "campaign_slug": "womens-shelter",
-            "title": "Construction",
-            "description": "Complete structural renovations",
-            "amount_sol": 10.0,
-            "due_date": "2025-04-30",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=25),
-        },
-        {
-            "campaign_slug": "womens-shelter",
-            "title": "Furnishing",
-            "description": "Furnish and equip shelter rooms",
-            "amount_sol": 5.0,
-            "due_date": "2025-05-31",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=22),
-        },
-        # STEM Lab
-        {
-            "campaign_slug": "youth-stem-lab",
-            "title": "Equipment",
-            "description": "Purchase computers, robotics kits, and lab furniture",
-            "amount_sol": 12.0,
-            "due_date": "2025-06-30",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=18),
-        },
-        {
-            "campaign_slug": "youth-stem-lab",
-            "title": "Launch Event",
-            "description": "Host opening ceremony and first training cohort",
-            "amount_sol": 8.0,
-            "due_date": "2025-07-31",
-            "status": "pending",
-            "evidence_urls": [],
-            "ai_decision": {},
-            "oracle_result": {},
-            "solana_tx": None,
-            "created_at": NOW - timedelta(days=16),
-        },
-    ]
+        for m in milestones_def:
+            milestone_doc = {
+                "campaign_id": campaign_id,
+                "title": m["title"],
+                "description": m["description"],
+                "amount_sol": m["amount_sol"],
+                "due_date": m["due_date"],
+                "status": "pending",
+                "evidence_urls": [],
+                "ai_decision": {},
+                "oracle_result": {},
+                "solana_tx": None,
+                "created_at": NOW - timedelta(days=6),
+            }
+            result = await db.milestones.update_one(
+                {"campaign_id": campaign_id, "title": m["title"]},
+                {"$setOnInsert": milestone_doc},
+                upsert=True,
+            )
+            action = "inserted" if result.upserted_id else "exists"
+            print(f"    [Milestone] {m['title']} — {action}")
 
-    milestone_ids = {}
-    for m in milestones_data:
-        slug = m.pop("campaign_slug")
-        campaign_id = campaign_ids[slug]
-        m["campaign_id"] = campaign_id
-
-        result = await db.milestones.update_one(
-            {"campaign_id": campaign_id, "title": m["title"]},
-            {"$setOnInsert": m},
-            upsert=True,
-        )
-        action = "inserted" if result.upserted_id else "exists"
-        print(f"  [Milestone] {m['title']} ({slug}) — {action}")
-
-        doc = await db.milestones.find_one({"campaign_id": campaign_id, "title": m["title"]})
-        milestone_ids[f"{slug}_{m['title']}"] = str(doc["_id"])
-
-    # ── Donations ────────────────────────────────────────────────────────────
-    donations_data = [
-        # Rural Health Van — 18 SOL released, 12 locked (staff training submitted), 15 pending
-        {
-            "campaign_slug": "rural-health-van",
-            "donor_id": donor_id,
-            "amount_sol": 20.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_1",
-            "released_sol": 8.0,
-            "locked_sol": 12.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=58),
-        },
-        {
-            "campaign_slug": "rural-health-van",
-            "donor_id": donor_id,
-            "amount_sol": 15.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_2",
-            "released_sol": 5.0,
-            "locked_sol": 10.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=50),
-        },
-        {
-            "campaign_slug": "rural-health-van",
-            "donor_id": donor_id,
-            "amount_sol": 10.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_3",
-            "released_sol": 5.0,
-            "locked_sol": 5.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=45),
-        },
-        # Solar Water Pumps
-        {
-            "campaign_slug": "solar-water-pumps",
-            "donor_id": donor_id,
-            "amount_sol": 15.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_4",
-            "released_sol": 0.0,
-            "locked_sol": 15.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=43),
-        },
-        {
-            "campaign_slug": "solar-water-pumps",
-            "donor_id": donor_id,
-            "amount_sol": 15.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_5",
-            "released_sol": 0.0,
-            "locked_sol": 15.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=40),
-        },
-        # Women's Shelter — 10 SOL released
-        {
-            "campaign_slug": "womens-shelter",
-            "donor_id": donor_id,
-            "amount_sol": 25.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_6",
-            "released_sol": 10.0,
-            "locked_sol": 15.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=28),
-        },
-        # STEM Lab
-        {
-            "campaign_slug": "youth-stem-lab",
-            "donor_id": donor_id,
-            "amount_sol": 12.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_7",
-            "released_sol": 0.0,
-            "locked_sol": 12.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=18),
-        },
-        {
-            "campaign_slug": "youth-stem-lab",
-            "donor_id": donor_id,
-            "amount_sol": 8.0,
-            "wallet_address": "DonorWa11etAddressFakeForSeedData111111111",
-            "solana_tx": "donor_tx_8",
-            "released_sol": 0.0,
-            "locked_sol": 8.0,
-            "refunded_sol": 0.0,
-            "created_at": NOW - timedelta(days=15),
-        },
-    ]
-
-    for d in donations_data:
-        slug = d.pop("campaign_slug")
-        campaign_id = campaign_ids[slug]
-        d["campaign_id"] = campaign_id
-
-        result = await db.donations.update_one(
-            {"campaign_id": campaign_id, "solana_tx": d["solana_tx"]},
-            {"$setOnInsert": d},
-            upsert=True,
-        )
-        action = "inserted" if result.upserted_id else "exists"
-        print(f"  [Donation] {d['amount_sol']} SOL → {slug} ({d['solana_tx']}) — {action}")
-
-    print("\n[Seed] Done.")
+    print("\n[Seed] Done. All SOL balances start at 0 — fund the vault with real devnet SOL.")
+    print(f"[Seed] Vault address: {VAULT_ADDRESS}")
+    print("[Seed] Run: solana airdrop 2 <vault_address> --url devnet")
     client.close()
 
 
