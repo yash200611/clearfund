@@ -1,14 +1,18 @@
+import asyncio
+import json
 import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from auth import TokenData, get_current_user, require_donor, require_ngo, require_verifier
+from auth import TokenData, decode_token, get_current_user, require_donor, require_ngo, require_verifier
+from pipeline.milestone_pipeline import process_milestone_submission
+from realtime.broker import manager
 from models import (
     Campaign,
     CreateCampaignRequest,
@@ -211,12 +215,6 @@ async def create_milestone(
     return milestone
 
 
-async def run_agent_pipeline(milestone_id: str):
-    """Stub: agent pipeline fires here after evidence submission."""
-    print(f"[agent] Pipeline triggered for milestone {milestone_id}")
-    # TODO: call Gemini + oracle + Solana release logic
-
-
 @app.post("/api/milestones/{milestone_id}/submit")
 async def submit_evidence(
     milestone_id: str,
@@ -241,7 +239,7 @@ async def submit_evidence(
         },
     )
 
-    background_tasks.add_task(run_agent_pipeline, milestone_id)
+    background_tasks.add_task(process_milestone_submission, milestone_id)
 
     updated = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
     return serialize(updated)
@@ -352,8 +350,8 @@ async def get_campaign_activity(campaign_id: str):
 # ─── User Profile ────────────────────────────────────────────────────────────
 
 class UpdateProfileRequest(_BaseModel):
-    name: str | None = None
-    email: str | None = None
+    name: Optional[str] = None
+    email: Optional[str] = None
 
 class UpdatePasswordRequest(_BaseModel):
     current: str
@@ -371,3 +369,163 @@ async def update_profile(body: UpdateProfileRequest, user: TokenData = Depends(g
 async def update_password(body: UpdatePasswordRequest, user: TokenData = Depends(get_current_user)):
     # Password changes are handled by Auth0 — this is a no-op stub
     return {"success": True}
+
+
+# ─── WebSocket helpers ────────────────────────────────────────────────────────
+
+async def _ws_authenticate(websocket: WebSocket) -> bool:
+    """
+    Expect first message: { "token": "<auth0_jwt>" }
+    Returns True if valid, sends error and closes if not.
+    """
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        data = json.loads(raw)
+        token = data.get("token", "")
+        decode_token(token)   # raises HTTPException if invalid
+        return True
+    except asyncio.TimeoutError:
+        await websocket.send_text(json.dumps({"error": "auth_timeout"}))
+        await websocket.close(code=1008)
+        return False
+    except Exception:
+        await websocket.send_text(json.dumps({"error": "unauthorized"}))
+        await websocket.close(code=1008)
+        return False
+
+
+async def _keepalive(websocket: WebSocket, interval: int = 30) -> None:
+    """Send ping every `interval` seconds to keep connection alive."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await websocket.send_text(json.dumps({"event_type": "ping"}))
+        except Exception:
+            break
+
+
+# ─── WebSocket endpoints ──────────────────────────────────────────────────────
+
+@app.websocket("/api/ws/agents")
+async def ws_global_feed(websocket: WebSocket):
+    """Global agent event feed — Agent Dashboard subscribes here."""
+    await websocket.accept()
+    if not await _ws_authenticate(websocket):
+        return
+
+    await manager.connect(websocket, milestone_id=None)
+    keepalive = asyncio.create_task(_keepalive(websocket))
+    try:
+        await websocket.send_text(json.dumps({"event_type": "connected", "channel": "global"}))
+        while True:
+            await websocket.receive_text()   # keep the loop alive; client sends pong
+    except WebSocketDisconnect:
+        pass
+    finally:
+        keepalive.cancel()
+        manager.disconnect(websocket, milestone_id=None)
+
+
+@app.websocket("/api/ws/milestones/{milestone_id}")
+async def ws_milestone_feed(websocket: WebSocket, milestone_id: str):
+    """Per-milestone event feed."""
+    await websocket.accept()
+    if not await _ws_authenticate(websocket):
+        return
+
+    await manager.connect(websocket, milestone_id=milestone_id)
+    keepalive = asyncio.create_task(_keepalive(websocket))
+    try:
+        await websocket.send_text(json.dumps({
+            "event_type":   "connected",
+            "channel":      "milestone",
+            "milestone_id": milestone_id,
+        }))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        keepalive.cancel()
+        manager.disconnect(websocket, milestone_id=milestone_id)
+
+
+# ─── Agent Audit Log routes ───────────────────────────────────────────────────
+
+@app.get("/api/agent-logs")
+async def get_agent_logs(
+    limit: int = Query(default=50, le=200),
+    user: TokenData = Depends(get_current_user),
+):
+    """Last N agent audit log entries across all milestones."""
+    logs = []
+    async for doc in db.agent_audit_logs.find().sort("created_at", -1).limit(limit):
+        logs.append(serialize(doc))
+    return logs
+
+
+@app.get("/api/agent-logs/{milestone_id}")
+async def get_milestone_logs(
+    milestone_id: str,
+    user: TokenData = Depends(get_current_user),
+):
+    """Full audit trail for a specific milestone."""
+    logs = []
+    async for doc in db.agent_audit_logs.find(
+        {"milestone_id": milestone_id}
+    ).sort("created_at", 1):
+        logs.append(serialize(doc))
+    return logs
+
+
+# ─── Enhanced Platform Analytics ─────────────────────────────────────────────
+
+@app.get("/api/analytics/platform")
+async def platform_analytics(user: TokenData = Depends(get_current_user)):
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # Campaign counts
+    campaigns_active    = await db.campaigns.count_documents({"status": "active"})
+    campaigns_completed = await db.campaigns.count_documents({"status": "completed"})
+
+    # Donation aggregation
+    donation_agg = await db.donations.aggregate([
+        {"$group": {
+            "_id":      None,
+            "raised":   {"$sum": "$amount_sol"},
+            "released": {"$sum": "$released_sol"},
+            "locked":   {"$sum": "$locked_sol"},
+        }}
+    ]).to_list(1)
+    d = donation_agg[0] if donation_agg else {}
+
+    # Milestone counts
+    milestones_approved = await db.milestones.count_documents({"status": "released"})
+    milestones_rejected = await db.milestones.count_documents({"status": "rejected"})
+
+    # Average confidence score from audit logs
+    conf_agg = await db.agent_audit_logs.aggregate([
+        {"$match": {"event_type": "agent_decision"}},
+        {"$group": {"_id": None, "avg": {"$avg": "$payload.confidence_score"}}},
+    ]).to_list(1)
+    avg_confidence = round(conf_agg[0]["avg"], 1) if conf_agg else 0.0
+
+    # Agent decisions today
+    decisions_today = await db.agent_audit_logs.count_documents({
+        "event_type": "agent_decision",
+        "created_at": {"$gte": today_start},
+    })
+
+    return {
+        "total_raised_sol":      d.get("raised", 0.0),
+        "total_released_sol":    d.get("released", 0.0),
+        "total_locked_sol":      d.get("locked", 0.0),
+        "campaigns_active":      campaigns_active,
+        "campaigns_completed":   campaigns_completed,
+        "milestones_approved":   milestones_approved,
+        "milestones_rejected":   milestones_rejected,
+        "avg_confidence_score":  avg_confidence,
+        "agent_decisions_today": decisions_today,
+    }

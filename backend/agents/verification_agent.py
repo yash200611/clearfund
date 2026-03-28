@@ -19,6 +19,13 @@ import google.generativeai as genai
 import httpx
 from dotenv import load_dotenv
 
+# Import broker lazily to avoid circular imports when running standalone
+try:
+    from realtime.broker import manager as _ws_manager
+    _HAS_BROKER = True
+except ImportError:
+    _HAS_BROKER = False
+
 load_dotenv()
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
@@ -27,11 +34,15 @@ MODEL_NAME = "gemini-2.5-pro"
 VISION_MODEL_NAME = "gemini-2.5-pro"
 MAX_ROUNDS = 5
 
-# ─── Stub websocket emitter (replaced in Phase 4) ────────────────────────────
+# ─── WebSocket event emitter ─────────────────────────────────────────────────
 
-def emit_agent_event(milestone_id: str, event_type: str, payload: dict) -> None:
+async def emit_agent_event(milestone_id: str, event_type: str, payload: dict) -> None:
     print(f"[WS] milestone={milestone_id} event={event_type}")
-    print(json.dumps(payload, indent=2))
+    if _HAS_BROKER:
+        try:
+            await _ws_manager.emit(milestone_id, event_type, payload)
+        except Exception as e:
+            print(f"[WS] Broadcast error: {e}")
 
 
 # ─── Tool: analyze_image ──────────────────────────────────────────────────────
@@ -169,9 +180,9 @@ SUBMIT_RESULT_DECLARATION = genai.protos.FunctionDeclaration(
     ),
 )
 
-# Tool 1: Google Search grounding (handled natively by Gemini — no manual execution needed)
+# Tool 1: Google Search grounding (handled natively by Gemini)
 GOOGLE_SEARCH_TOOL = genai.protos.Tool(
-    google_search=genai.protos.GoogleSearch()
+    google_search_retrieval=genai.protos.GoogleSearchRetrieval()
 )
 
 # Tools 2 & 3: Function declarations we execute manually
@@ -184,6 +195,11 @@ FUNCTION_TOOLS = genai.protos.Tool(
 
 async def run_verification_agent(milestone: dict, campaign: dict) -> dict:
     milestone_id = str(milestone.get("id", milestone.get("_id", "unknown")))
+
+    await emit_agent_event(milestone_id, "agent_started", {
+        "milestone_title": milestone.get("title", ""),
+        "campaign_name":   campaign.get("title", ""),
+    })
 
     system_prompt = """You are ClearFund's Verification Agent — an autonomous AI auditor for a milestone-based escrow donation platform.
 
@@ -271,7 +287,7 @@ Steps:
                 tool_name = fc.name
                 tool_args = dict(fc.args)
 
-                emit_agent_event(milestone_id, "tool_called", {"tool": tool_name, "args": tool_args})
+                await emit_agent_event(milestone_id, "tool_called", {"tool": tool_name, "args": tool_args})
 
                 # ── Terminal tool ─────────────────────────────────────────
                 if tool_name == "submit_verification_result":
@@ -283,7 +299,7 @@ Steps:
                         "red_flags": list(tool_args.get("red_flags", [])),
                         "verified_claims": list(tool_args.get("verified_claims", [])),
                     }
-                    emit_agent_event(milestone_id, "agent_decision", result)
+                    await emit_agent_event(milestone_id, "agent_decision", result)
                     return result
 
                 # ── analyze_image ─────────────────────────────────────────
@@ -292,7 +308,7 @@ Steps:
                         image_url=tool_args["image_url"],
                         check_for=tool_args["check_for"],
                     )
-                    emit_agent_event(milestone_id, "tool_result", {"tool": tool_name, "result": tool_result})
+                    await emit_agent_event(milestone_id, "tool_result", {"tool": tool_name, "result": tool_result})
                     function_responses.append(
                         genai.protos.Part(
                             function_response=genai.protos.FunctionResponse(
