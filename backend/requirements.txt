@@ -8,3 +8,4 @@ solana
 python-multipart
 redis
 python-dotenv
+pillow

@@ -1,14 +1,18 @@
 """
 ClearFund Verification Agent
-Gemini 2.0 Flash with function calling — verifies NGO milestone evidence.
-Never receives wallet IDs, private keys, or transaction data.
-Never triggers financial actions directly.
+Gemini 2.5 Pro with function calling — verifies NGO milestone evidence.
+
+Architecture rules (enforced):
+- Produces ONLY a structured decision JSON
+- Never receives wallet IDs, private keys, or transaction data
+- Never triggers any financial action directly
+- Max 5 rounds of function calling before forced termination
 """
 
 import asyncio
+import io
 import json
 import os
-from datetime import datetime
 from typing import Any
 
 import google.generativeai as genai
@@ -19,18 +23,22 @@ load_dotenv()
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
 
+MODEL_NAME = "gemini-2.5-pro"
+VISION_MODEL_NAME = "gemini-2.5-pro"
 MAX_ROUNDS = 5
 
 # ─── Stub websocket emitter (replaced in Phase 4) ────────────────────────────
 
-def emit_agent_event(milestone_id: str, event_type: str, payload: dict):
-    print(f"[WS EVENT] milestone={milestone_id} type={event_type} payload={json.dumps(payload, indent=2)}")
+def emit_agent_event(milestone_id: str, event_type: str, payload: dict) -> None:
+    print(f"[WS] milestone={milestone_id} event={event_type}")
+    print(json.dumps(payload, indent=2))
 
 
-# ─── Tool implementations ─────────────────────────────────────────────────────
+# ─── Tool: analyze_image ──────────────────────────────────────────────────────
 
 async def analyze_image(image_url: str, check_for: str) -> dict:
-    """Make a Gemini Vision call to assess image authenticity."""
+    """Fetch an image and assess it with Gemini Vision."""
+    # Fetch the image
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(image_url)
@@ -39,247 +47,279 @@ async def analyze_image(image_url: str, check_for: str) -> dict:
             mime_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
     except Exception as e:
         return {
-            "description": f"Could not fetch image: {str(e)}",
+            "description": f"Could not fetch image: {e}",
             "authenticity_score": 0,
             "concerns": ["image_unreachable"],
         }
 
+    # Analyze with Gemini Vision
     try:
-        vision_model = genai.GenerativeModel("gemini-2.0-flash")
-        vision_prompt = f"""Analyze this image for the following context: {check_for}
+        import PIL.Image
 
-Assess and respond with ONLY valid JSON in this exact format:
+        image = PIL.Image.open(io.BytesIO(image_bytes))
+        vision_model = genai.GenerativeModel(VISION_MODEL_NAME)
+        prompt = f"""Analyze this image for the following milestone context: {check_for}
+
+Respond with ONLY valid JSON — no markdown, no explanation:
 {{
-  "description": "what is in the image",
+  "description": "concise description of what is in the image",
   "authenticity_score": <integer 0-10>,
-  "concerns": ["list", "of", "concerns"]
+  "concerns": ["list", "of", "specific", "concerns"]
 }}
 
 Authenticity score guide:
-- 9-10: Clear, unambiguous real evidence with contextual details
-- 7-8: Genuine looking, minor uncertainty
-- 5-6: Plausible but unverifiable details
-- 3-4: Staged or stock-photo appearance
-- 0-2: Clearly fabricated, irrelevant, or inaccessible
+- 9-10: Clear, unambiguous real evidence with verifiable contextual details
+- 7-8: Genuine looking with minor uncertainty
+- 5-6: Plausible but key details unverifiable
+- 3-4: Staged, stock-photo appearance, or irrelevant
+- 0-2: Clearly fabricated, wrong context, or inaccessible
 
-In your concerns, note: signs of staging, timestamp plausibility,
-relevance to claimed milestone, presence of expected objects/people/locations."""
+Evaluate: signs of staging, timestamp plausibility, relevance to the
+claimed milestone, presence of expected objects/people/locations."""
 
-        import PIL.Image
-        import io
-        image = PIL.Image.open(io.BytesIO(image_bytes))
-        response = vision_model.generate_content([vision_prompt, image])
+        response = vision_model.generate_content([prompt, image])
         text = response.text.strip()
+
+        # Strip markdown code fences if present
         if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1]) if lines[-1] == "```" else "\n".join(lines[1:])
+
         return json.loads(text)
+
     except Exception as e:
         return {
-            "description": f"Vision analysis failed: {str(e)}",
-            "authenticity_score": 3,
-            "concerns": ["analysis_error"],
+            "description": f"Vision analysis failed: {e}",
+            "authenticity_score": 2,
+            "concerns": ["analysis_error", str(e)],
         }
 
 
-def build_submit_verification_result_schema() -> dict:
-    return {
-        "name": "submit_verification_result",
-        "description": (
-            "TERMINAL TOOL — call this as your final action to submit the verification decision. "
-            "Once called, the agent loop terminates."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "confidence_score": {
-                    "type": "integer",
-                    "description": "0-100. Score >= 75 only if evidence is concrete and independently verifiable.",
-                },
-                "recommendation": {
-                    "type": "string",
-                    "enum": ["approve", "reject", "needs_info"],
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "Minimum 50 characters. Explain your decision in detail.",
-                },
-                "evidence_quality": {
-                    "type": "string",
-                    "enum": ["strong", "moderate", "weak"],
-                },
-                "red_flags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List any concerns, inconsistencies, or suspicious elements found.",
-                },
-                "verified_claims": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Claims that could be independently verified.",
-                },
-            },
-            "required": [
-                "confidence_score",
-                "recommendation",
-                "reasoning",
-                "evidence_quality",
-                "red_flags",
-                "verified_claims",
-            ],
-        },
-    }
+# ─── Tool schemas ─────────────────────────────────────────────────────────────
 
-
-def build_analyze_image_schema() -> dict:
-    return {
-        "name": "analyze_image",
-        "description": "Fetch and analyze an image URL using Gemini Vision to assess authenticity and relevance to the milestone.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "image_url": {
-                    "type": "string",
-                    "description": "Public URL of the image to analyze.",
-                },
-                "check_for": {
-                    "type": "string",
-                    "description": "What to look for in the image (context about the milestone).",
-                },
-            },
-            "required": ["image_url", "check_for"],
+ANALYZE_IMAGE_DECLARATION = genai.protos.FunctionDeclaration(
+    name="analyze_image",
+    description=(
+        "Fetch and analyze an image URL using Gemini Vision. "
+        "Assesses authenticity, relevance to the milestone, and signs of staging."
+    ),
+    parameters=genai.protos.Schema(
+        type=genai.protos.Type.OBJECT,
+        properties={
+            "image_url": genai.protos.Schema(
+                type=genai.protos.Type.STRING,
+                description="Public URL of the image to analyze.",
+            ),
+            "check_for": genai.protos.Schema(
+                type=genai.protos.Type.STRING,
+                description="Context about the milestone — what objects/evidence to look for.",
+            ),
         },
-    }
+        required=["image_url", "check_for"],
+    ),
+)
+
+SUBMIT_RESULT_DECLARATION = genai.protos.FunctionDeclaration(
+    name="submit_verification_result",
+    description=(
+        "TERMINAL TOOL — call this as your absolute final action. "
+        "Submits the structured verification decision and terminates the agent loop."
+    ),
+    parameters=genai.protos.Schema(
+        type=genai.protos.Type.OBJECT,
+        properties={
+            "confidence_score": genai.protos.Schema(
+                type=genai.protos.Type.INTEGER,
+                description=(
+                    "0-100. Score >= 75 ONLY if evidence is concrete and independently verifiable. "
+                    "Anything unverifiable must score below 60."
+                ),
+            ),
+            "recommendation": genai.protos.Schema(
+                type=genai.protos.Type.STRING,
+                enum=["approve", "reject", "needs_info"],
+            ),
+            "reasoning": genai.protos.Schema(
+                type=genai.protos.Type.STRING,
+                description="Minimum 50 characters. Detailed explanation of the decision.",
+            ),
+            "evidence_quality": genai.protos.Schema(
+                type=genai.protos.Type.STRING,
+                enum=["strong", "moderate", "weak"],
+            ),
+            "red_flags": genai.protos.Schema(
+                type=genai.protos.Type.ARRAY,
+                items=genai.protos.Schema(type=genai.protos.Type.STRING),
+                description="Any concerns, inconsistencies, or suspicious elements found.",
+            ),
+            "verified_claims": genai.protos.Schema(
+                type=genai.protos.Type.ARRAY,
+                items=genai.protos.Schema(type=genai.protos.Type.STRING),
+                description="Specific claims that were independently verified.",
+            ),
+        },
+        required=[
+            "confidence_score",
+            "recommendation",
+            "reasoning",
+            "evidence_quality",
+            "red_flags",
+            "verified_claims",
+        ],
+    ),
+)
+
+# Tool 1: Google Search grounding (handled natively by Gemini — no manual execution needed)
+GOOGLE_SEARCH_TOOL = genai.protos.Tool(
+    google_search=genai.protos.GoogleSearch()
+)
+
+# Tools 2 & 3: Function declarations we execute manually
+FUNCTION_TOOLS = genai.protos.Tool(
+    function_declarations=[ANALYZE_IMAGE_DECLARATION, SUBMIT_RESULT_DECLARATION]
+)
 
 
 # ─── Main agent ───────────────────────────────────────────────────────────────
 
 async def run_verification_agent(milestone: dict, campaign: dict) -> dict:
-    milestone_id = milestone.get("id", "unknown")
+    milestone_id = str(milestone.get("id", milestone.get("_id", "unknown")))
 
     system_prompt = """You are ClearFund's Verification Agent — an autonomous AI auditor for a milestone-based escrow donation platform.
 
-Your job: determine if an NGO genuinely completed a milestone before donor funds are released.
+Your job: determine if an NGO genuinely completed a milestone before donor funds are released from escrow.
 
-RULES:
-- You MUST call submit_verification_result as your FINAL action — no exceptions.
+STRICT RULES:
+- You MUST call submit_verification_result as your ABSOLUTE FINAL action — no exceptions.
 - Score >= 75 ONLY if evidence is concrete, specific, and independently verifiable.
-- Anything unverifiable scores below 60.
-- If you find a red flag, list it explicitly in red_flags.
-- Use google_search to verify NGO claims against public records when possible.
-- Use analyze_image on every image URL provided.
-- Be rigorous. Fabricated or vague evidence should be rejected.
-- You do NOT have access to wallet data, transactions, or private information."""
+- Anything that cannot be independently verified must score below 60.
+- If you find any red flag, list it explicitly in red_flags.
+- Use google_search to cross-check NGO claims against public records, news, or official registries.
+- Call analyze_image on EVERY image URL provided — do not skip any.
+- Be rigorous. Vague, staged, or unverifiable evidence = rejection.
+- You do NOT have access to wallet addresses, private keys, or transaction data. Do not ask for them."""
 
     evidence_urls = milestone.get("evidence_urls", [])
-    evidence_str = "\n".join(f"  - {url}" for url in evidence_urls) if evidence_urls else "  (none provided)"
+    evidence_str = (
+        "\n".join(f"  - {url}" for url in evidence_urls)
+        if evidence_urls
+        else "  (no evidence provided)"
+    )
 
     user_message = f"""Please verify the following milestone completion claim:
 
 CAMPAIGN: {campaign.get('title', 'Unknown')}
-NGO: {campaign.get('ngo_name', 'Unknown')}
+NGO: {campaign.get('ngo_name', campaign.get('ngo_id', 'Unknown'))}
 
-MILESTONE: {milestone.get('title', 'Unknown')}
-CLAIMED COMPLETION: {milestone.get('description', 'No description')}
+MILESTONE TITLE: {milestone.get('title', 'Unknown')}
+CLAIMED COMPLETION: {milestone.get('description', 'No description provided')}
 AMOUNT IN ESCROW: {milestone.get('amount_sol', 0)} SOL
 DUE DATE: {milestone.get('due_date', 'Unknown')}
 
 EVIDENCE PROVIDED:
 {evidence_str}
 
-Analyze all evidence, search for supporting or contradicting information,
-and submit your final verification decision using submit_verification_result."""
-
-    tools = [
-        {"google_search": {}},
-        build_analyze_image_schema(),
-        build_submit_verification_result_schema(),
-    ]
-
-    model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
-        system_instruction=system_prompt,
-        tools=tools,
-    )
-
-    history = []
-    history.append({"role": "user", "parts": [user_message]})
+Steps:
+1. Search for public information about this NGO and their claimed work
+2. Analyze every image URL provided using analyze_image
+3. Assess overall credibility and cross-reference all findings
+4. Submit your final verdict using submit_verification_result"""
 
     timeout_result = {
         "confidence_score": 0,
         "recommendation": "reject",
-        "reasoning": "Agent did not reach a decision within the maximum number of rounds.",
+        "reasoning": "Agent did not reach a decision within the maximum number of rounds. Manual review required.",
         "evidence_quality": "weak",
         "red_flags": ["agent_timeout"],
         "verified_claims": [],
     }
 
+    model = genai.GenerativeModel(
+        model_name=MODEL_NAME,
+        system_instruction=system_prompt,
+        tools=[GOOGLE_SEARCH_TOOL, FUNCTION_TOOLS],
+    )
+
+    chat = model.start_chat(history=[])
+
     for round_num in range(MAX_ROUNDS):
-        print(f"\n[Agent] Round {round_num + 1}/{MAX_ROUNDS}")
+        print(f"\n[Agent] ── Round {round_num + 1}/{MAX_ROUNDS} ──")
 
-        response = model.generate_content(history)
-        candidate = response.candidates[0]
+        # Send user message on round 0, otherwise the chat already has context
+        if round_num == 0:
+            response = chat.send_message(user_message)
+        else:
+            # Response was already sent at bottom of previous round via function results
+            # This branch is only reached if we looped without sending — shouldn't happen
+            break
 
-        # Collect all parts from the response
-        assistant_parts = []
-        function_calls_found = []
+        # Process all rounds via function call handling below
+        while True:
+            candidate = response.candidates[0]
+            parts = candidate.content.parts
 
-        for part in candidate.content.parts:
-            assistant_parts.append(part)
-            if hasattr(part, "function_call") and part.function_call:
-                function_calls_found.append(part.function_call)
+            function_calls = [p.function_call for p in parts if hasattr(p, "function_call") and p.function_call.name]
 
-        history.append({"role": "model", "parts": assistant_parts})
+            if not function_calls:
+                # Model returned text with no function calls — no decision reached
+                print(f"[Agent] No function calls in round {round_num + 1}, forcing termination.")
+                return timeout_result
 
-        if not function_calls_found:
-            # No tool calls — model gave a text response without deciding
-            print("[Agent] No function calls in response, forcing termination.")
-            return timeout_result
+            function_responses = []
 
-        tool_results = []
+            for fc in function_calls:
+                tool_name = fc.name
+                tool_args = dict(fc.args)
 
-        for fc in function_calls_found:
-            tool_name = fc.name
-            tool_args = dict(fc.args)
+                emit_agent_event(milestone_id, "tool_called", {"tool": tool_name, "args": tool_args})
 
-            emit_agent_event(milestone_id, "tool_called", {"tool": tool_name, "args": tool_args})
-
-            # ── Terminal tool ──
-            if tool_name == "submit_verification_result":
-                # Validate required fields
-                result = {
-                    "confidence_score": int(tool_args.get("confidence_score", 0)),
-                    "recommendation": tool_args.get("recommendation", "reject"),
-                    "reasoning": tool_args.get("reasoning", ""),
-                    "evidence_quality": tool_args.get("evidence_quality", "weak"),
-                    "red_flags": list(tool_args.get("red_flags", [])),
-                    "verified_claims": list(tool_args.get("verified_claims", [])),
-                }
-                emit_agent_event(milestone_id, "agent_decision", result)
-                return result
-
-            # ── analyze_image ──
-            elif tool_name == "analyze_image":
-                tool_result = await analyze_image(
-                    image_url=tool_args["image_url"],
-                    check_for=tool_args["check_for"],
-                )
-                emit_agent_event(milestone_id, "tool_result", {"tool": tool_name, "result": tool_result})
-                tool_results.append({
-                    "function_response": {
-                        "name": tool_name,
-                        "response": tool_result,
+                # ── Terminal tool ─────────────────────────────────────────
+                if tool_name == "submit_verification_result":
+                    result = {
+                        "confidence_score": int(tool_args.get("confidence_score", 0)),
+                        "recommendation": tool_args.get("recommendation", "reject"),
+                        "reasoning": tool_args.get("reasoning", ""),
+                        "evidence_quality": tool_args.get("evidence_quality", "weak"),
+                        "red_flags": list(tool_args.get("red_flags", [])),
+                        "verified_claims": list(tool_args.get("verified_claims", [])),
                     }
-                })
+                    emit_agent_event(milestone_id, "agent_decision", result)
+                    return result
 
-            # ── google_search is handled natively by Gemini grounding ──
-            # Its results appear directly in the model response parts
+                # ── analyze_image ─────────────────────────────────────────
+                elif tool_name == "analyze_image":
+                    tool_result = await analyze_image(
+                        image_url=tool_args["image_url"],
+                        check_for=tool_args["check_for"],
+                    )
+                    emit_agent_event(milestone_id, "tool_result", {"tool": tool_name, "result": tool_result})
+                    function_responses.append(
+                        genai.protos.Part(
+                            function_response=genai.protos.FunctionResponse(
+                                name=tool_name,
+                                response={"result": tool_result},
+                            )
+                        )
+                    )
+
+                # ── google_search is grounded natively — no manual handling ──
+                else:
+                    print(f"[Agent] Native tool response for: {tool_name}")
+
+            # Send function results back and get next response
+            if function_responses:
+                round_num += 1
+                if round_num >= MAX_ROUNDS:
+                    print("[Agent] Max rounds reached.")
+                    return timeout_result
+                print(f"\n[Agent] ── Round {round_num + 1}/{MAX_ROUNDS} ──")
+                response = chat.send_message(function_responses)
             else:
-                print(f"[Agent] Unknown tool called: {tool_name}")
+                # Only grounding tools were called (google_search) — model will continue
+                # Gemini returns the next response inline, no need to re-send
+                break
 
-        if tool_results:
-            history.append({"role": "user", "parts": tool_results})
+        break  # Exit outer loop after inner while handles all rounds
 
     return timeout_result
 
