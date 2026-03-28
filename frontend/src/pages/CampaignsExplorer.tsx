@@ -3,7 +3,7 @@ import { Search } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
 import { CampaignCard } from '@/components/CampaignCard'
 import { getCampaigns } from '@/api/client'
-import type { Campaign } from '@/data/seed'
+import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
 
 const CATEGORIES = ['All', 'Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate']
@@ -19,7 +19,7 @@ export default function CampaignsExplorer() {
     getCampaigns({ search, category }).then(data => {
       setCampaigns(data)
       setLoading(false)
-    })
+    }).catch(() => setLoading(false))
   }, [search, category])
 
   return (
@@ -67,7 +67,7 @@ export default function CampaignsExplorer() {
         </GlassCard>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {campaigns.map(c => <CampaignCard key={c.id} campaign={c} />)}
+          {campaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
         </div>
       )}
     </div>

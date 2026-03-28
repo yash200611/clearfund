@@ -4,37 +4,36 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { CampaignCard } from '@/components/CampaignCard'
 import { useAuth } from '@/contexts/AuthContext'
 import { getCampaigns, getMyDonations, getPlatformAnalytics } from '@/api/client'
-import type { Campaign } from '@/data/seed'
-import type { Donation } from '@/data/seed'
+import type { Campaign, Donation } from '@/api/client'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [donations, setDonations] = useState<Donation[]>([])
-  const [stats, setStats] = useState<{ total_protected: string; success_rate: string; total_campaigns: number; total_donors: number } | null>(null)
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
-    getCampaigns().then(setCampaigns)
-    if (user?.role === 'donor') getMyDonations().then(setDonations)
-    getPlatformAnalytics().then(setStats)
+    getCampaigns().then(setCampaigns).catch(() => {})
+    if (user?.role === 'donor') getMyDonations().then(setDonations).catch(() => {})
+    getPlatformAnalytics().then(s => setStats(s as Record<string, unknown>)).catch(() => {})
   }, [user])
 
-  const totalDonated = donations.reduce((s, d) => s + d.amount, 0)
-  const totalReleased = donations.reduce((s, d) => s + d.released_portion, 0)
-  const totalRefundable = donations.reduce((s, d) => s + d.refundable_portion, 0)
+  const totalDonated = donations.reduce((s, d) => s + d.amount_sol, 0)
+  const totalReleased = donations.reduce((s, d) => s + d.released_sol, 0)
+  const totalLocked = donations.reduce((s, d) => s + d.locked_sol, 0)
 
   const donorStatCards = [
-    { icon: DollarSign, label: 'Total Donated', value: `$${totalDonated.toLocaleString()}`, sub: 'Lifetime giving' },
-    { icon: TrendingUp, label: 'Released to NGOs', value: `$${totalReleased.toLocaleString()}`, sub: 'Impact delivered' },
-    { icon: Shield, label: 'In Escrow', value: `$${totalRefundable.toLocaleString()}`, sub: 'Protected funds' },
+    { icon: DollarSign, label: 'Total Donated', value: `${totalDonated.toFixed(2)} SOL`, sub: 'Lifetime giving' },
+    { icon: TrendingUp, label: 'Released to NGOs', value: `${totalReleased.toFixed(2)} SOL`, sub: 'Impact delivered' },
+    { icon: Shield, label: 'In Escrow', value: `${totalLocked.toFixed(2)} SOL`, sub: 'Protected funds' },
     { icon: Users, label: 'Campaigns', value: String(donations.length), sub: 'Supported projects' },
   ]
 
   const platformStatCards = [
-    { icon: DollarSign, label: 'Total Protected', value: stats?.total_protected ?? '—', sub: 'Across all campaigns' },
-    { icon: TrendingUp, label: 'Success Rate', value: stats?.success_rate ?? '—', sub: 'Milestones verified' },
+    { icon: DollarSign, label: 'Total Protected', value: (stats?.total_protected as string) ?? '—', sub: 'Across all campaigns' },
+    { icon: TrendingUp, label: 'Success Rate', value: (stats?.success_rate as string) ?? '—', sub: 'Milestones verified' },
     { icon: Shield, label: 'Active Campaigns', value: String(stats?.total_campaigns ?? '—'), sub: 'Live right now' },
-    { icon: Users, label: 'Total Donors', value: stats?.total_donors?.toLocaleString() ?? '—', sub: 'Global community' },
+    { icon: Users, label: 'Total Donors', value: String(stats?.total_donors ?? '—'), sub: 'Global community' },
   ]
 
   const statCards = user?.role === 'donor' ? donorStatCards : platformStatCards
@@ -64,13 +63,11 @@ export default function Dashboard() {
       </div>
 
       <div>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">
-            {user?.role === 'donor' ? 'Featured Campaigns' : 'Active Campaigns'}
-          </h3>
-        </div>
+        <h3 className="text-lg font-semibold text-white mb-4">
+          {user?.role === 'donor' ? 'Featured Campaigns' : 'Active Campaigns'}
+        </h3>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {campaigns.slice(0, 3).map(c => <CampaignCard key={c.id} campaign={c} />)}
+          {campaigns.slice(0, 3).map(c => <CampaignCard key={c._id} campaign={c} />)}
         </div>
       </div>
     </div>

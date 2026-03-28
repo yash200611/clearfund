@@ -7,16 +7,23 @@ import { MetalButton } from '@/components/ui/metal-button'
 import { GlassCard } from '@/components/ui/glass-card'
 import { NGOCarousel } from '@/components/NGOCarousel'
 import { CampaignCard } from '@/components/CampaignCard'
-import { CAMPAIGNS, PLATFORM_STATS } from '@/data/seed'
+import { getCampaigns } from '@/api/client'
+import type { Campaign } from '@/api/client'
+import { PLATFORM_STATS } from '@/data/seed'
 
 export default function Landing() {
   const navigate = useNavigate()
   const [scrolled, setScrolled] = useState(false)
+  const [featuredCampaigns, setFeaturedCampaigns] = useState<Campaign[]>([])
 
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 20)
     window.addEventListener('scroll', h)
     return () => window.removeEventListener('scroll', h)
+  }, [])
+
+  useEffect(() => {
+    getCampaigns().then(data => setFeaturedCampaigns(data.slice(0, 3))).catch(() => {})
   }, [])
 
   const stats = [
@@ -139,7 +146,7 @@ export default function Landing() {
             </button>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {CAMPAIGNS.slice(0, 3).map(c => <CampaignCard key={c.id} campaign={c} />)}
+            {featuredCampaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
           </div>
         </div>
       </section>

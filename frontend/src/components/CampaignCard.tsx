@@ -4,8 +4,7 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
 import { StatusBadge } from '@/components/StatusBadge'
-import { EscrowProgressBar } from '@/components/EscrowProgressBar'
-import type { Campaign } from '@/data/seed'
+import type { Campaign } from '@/api/client'
 
 interface CampaignCardProps {
   campaign: Campaign
@@ -13,19 +12,27 @@ interface CampaignCardProps {
 
 export function CampaignCard({ campaign }: CampaignCardProps) {
   const navigate = useNavigate()
-  const pct = Math.round((campaign.total_raised / campaign.goal) * 100)
+  const raised = campaign.total_raised_sol
+  const goal = campaign.goal ?? 0
+  const pct = goal > 0 ? Math.round((raised / goal) * 100) : 0
 
   return (
     <GlassCard
       className="overflow-hidden cursor-pointer group"
-      onClick={() => navigate(`/campaigns/${campaign.id}`)}
+      onClick={() => navigate(`/campaigns/${campaign._id}`)}
     >
       <div className="relative h-44 overflow-hidden">
-        <img
-          src={campaign.image}
-          alt={campaign.title}
-          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-        />
+        {campaign.image ? (
+          <img
+            src={campaign.image}
+            alt={campaign.title}
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+          />
+        ) : (
+          <div className="w-full h-full bg-white/[0.04] flex items-center justify-center">
+            <span className="text-4xl font-black text-white/10">{campaign.category?.[0]}</span>
+          </div>
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         <div className="absolute top-3 left-3 flex gap-2 flex-wrap">
           <StatusBadge status={campaign.status} />
@@ -46,26 +53,30 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
         <h3 className="text-base font-semibold text-white mb-2 line-clamp-2 leading-snug">{campaign.title}</h3>
         <p className="text-sm text-white/50 mb-4 line-clamp-2">{campaign.description}</p>
 
-        <EscrowProgressBar
-          goal={campaign.goal}
-          released={campaign.released}
-          locked={campaign.locked}
-          refunded={campaign.refunded}
-        />
+        <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+          <div
+            className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700"
+            style={{ width: `${Math.min(100, pct)}%` }}
+          />
+        </div>
 
         <div className="flex items-center justify-between mt-3">
           <div>
-            <p className="text-lg font-bold text-white">${campaign.total_raised.toLocaleString()}</p>
-            <p className="text-xs text-white/40">of ${campaign.goal.toLocaleString()} goal · {pct}%</p>
+            <p className="text-lg font-bold text-white">{raised.toFixed(2)} SOL</p>
+            {goal > 0 && (
+              <p className="text-xs text-white/40">of {goal} SOL goal · {pct}%</p>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-1 text-white/50 text-xs">
-              <Users className="w-3 h-3" />
-              {campaign.donors_count} donors
-            </div>
+            {campaign.donors_count != null && (
+              <div className="flex items-center gap-1 text-white/50 text-xs">
+                <Users className="w-3 h-3" />
+                {campaign.donors_count} donors
+              </div>
+            )}
             <div className="flex items-center gap-1 text-white/40 text-xs">
               <Clock className="w-3 h-3" />
-              {campaign.created_at}
+              {campaign.created_at?.slice(0, 10)}
             </div>
           </div>
         </div>

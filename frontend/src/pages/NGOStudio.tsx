@@ -5,9 +5,8 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
-import { StatusBadge } from '@/components/StatusBadge'
 import { getCampaigns, createCampaign } from '@/api/client'
-import type { Campaign } from '@/data/seed'
+import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
 
 const TABS = ['My Campaigns', 'New Campaign']
@@ -16,18 +15,29 @@ export default function NGOStudio() {
   const [tab, setTab] = useState(0)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare', goal: '', image: '' })
+  const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare', vault_address: '' })
 
-  useEffect(() => { getCampaigns().then(setCampaigns) }, [])
+  useEffect(() => { getCampaigns().then(setCampaigns).catch(() => {}) }, [])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    await createCampaign({ ...form, goal: Number(form.goal) })
-    setSaving(false)
-    toast.success('Campaign launched! It will be reviewed and go live shortly.')
-    setForm({ title: '', description: '', category: 'Healthcare', goal: '', image: '' })
-    setTab(0)
+    try {
+      await createCampaign({
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        vault_address: form.vault_address || undefined,
+      })
+      toast.success('Campaign launched! It will go live after review.')
+      setForm({ title: '', description: '', category: 'Healthcare', vault_address: '' })
+      setTab(0)
+      getCampaigns().then(setCampaigns).catch(() => {})
+    } catch (err) {
+      toast.error('Failed to create campaign. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const inputClass = "w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
@@ -45,7 +55,6 @@ export default function NGOStudio() {
         </button>
       </div>
 
-      {/* Tab switcher */}
       <div className="flex gap-1 bg-white/[0.04] border border-white/[0.06] rounded-xl p-1 w-fit">
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)}
@@ -65,7 +74,7 @@ export default function NGOStudio() {
             </GlassCard>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {campaigns.map(c => <CampaignCard key={c.id} campaign={c} />)}
+              {campaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
             </div>
           )}
         </div>
@@ -95,15 +104,10 @@ export default function NGOStudio() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Funding Goal (USD)</label>
-                <input type="number" value={form.goal} onChange={e => setForm(f => ({...f, goal: e.target.value}))} required
-                  placeholder="50000" min="1000" className={inputClass} />
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Vault Address (optional)</label>
+                <input value={form.vault_address} onChange={e => setForm(f => ({...f, vault_address: e.target.value}))}
+                  placeholder="Solana vault address" className={inputClass} />
               </div>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Hero Image URL</label>
-              <input value={form.image} onChange={e => setForm(f => ({...f, image: e.target.value}))}
-                placeholder="https://images.pexels.com/..." className={inputClass} />
             </div>
             <div className="flex gap-3 pt-2">
               <LiquidButton type="submit" disabled={saving}>

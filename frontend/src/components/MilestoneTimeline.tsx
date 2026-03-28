@@ -1,12 +1,12 @@
 import { Check, Clock, Lock, X, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Milestone } from '@/data/seed'
+import type { Milestone } from '@/api/client'
 
 interface MilestoneTimelineProps {
   milestones: Milestone[]
 }
 
-const STATUS_ICON = {
+const STATUS_ICON: Record<string, React.ElementType> = {
   released: Check,
   approved: Check,
   submitted: Upload,
@@ -14,7 +14,7 @@ const STATUS_ICON = {
   rejected: X,
 }
 
-const STATUS_STYLE = {
+const STATUS_STYLE: Record<string, string> = {
   released: 'bg-white text-black border-white shadow-[0_0_12px_rgba(255,255,255,0.4)]',
   approved: 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.4)]',
   submitted: 'bg-amber-500/20 text-amber-400 border-amber-400/50 animate-pulse',
@@ -22,7 +22,7 @@ const STATUS_STYLE = {
   rejected: 'bg-red-500/20 text-red-400 border-red-400/50',
 }
 
-const LINE_STYLE = {
+const LINE_STYLE: Record<string, string> = {
   released: 'bg-white',
   approved: 'bg-emerald-500',
   submitted: 'bg-amber-400/50',
@@ -39,7 +39,7 @@ export function MilestoneTimeline({ milestones }: MilestoneTimelineProps) {
         const isLast = i === milestones.length - 1
 
         return (
-          <div key={m.id} className="flex gap-4">
+          <div key={m._id} className="flex gap-4">
             <div className="flex flex-col items-center">
               <div className={cn('w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all duration-300', nodeStyle)}>
                 <Icon className="w-3.5 h-3.5" />
@@ -51,7 +51,7 @@ export function MilestoneTimeline({ milestones }: MilestoneTimelineProps) {
             <div className={cn('pb-6 flex-1', isLast && 'pb-0')}>
               <div className="flex items-start justify-between gap-2 mb-1">
                 <h4 className="text-sm font-semibold text-white">{m.title}</h4>
-                <span className="text-sm font-bold text-white/80 flex-shrink-0">${m.amount.toLocaleString()}</span>
+                <span className="text-sm font-bold text-white/80 flex-shrink-0">{m.amount_sol} SOL</span>
               </div>
               <p className="text-xs text-white/50 mb-2">{m.description}</p>
               <div className="flex items-center gap-3 text-xs text-white/40">
@@ -60,14 +60,14 @@ export function MilestoneTimeline({ milestones }: MilestoneTimelineProps) {
                   Due {m.due_date}
                 </span>
               </div>
-              {m.evidence && (
-                <div className="mt-2 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-xs text-white/60">
-                  {m.evidence}
+              {m.evidence_urls?.length > 0 && (
+                <div className="mt-2 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-xs text-white/60 break-all">
+                  {m.evidence_urls.join(', ')}
                 </div>
               )}
-              {m.reviewer_notes && (
-                <div className="mt-1.5 p-2 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/[0.15] text-xs text-emerald-400/80">
-                  ✓ {m.reviewer_notes}
+              {m.solana_tx && (
+                <div className="mt-1.5 p-2 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/[0.15] text-xs text-emerald-400/80 font-mono truncate">
+                  tx: {m.solana_tx}
                 </div>
               )}
             </div>

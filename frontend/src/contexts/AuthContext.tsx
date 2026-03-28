@@ -50,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const u = auth0User;
     async function fetchProfile() {
       setProfileLoading(true);
       try {
@@ -60,30 +61,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const profile = await res.json();
           setAppUser({
-            id: profile._id ?? profile.id ?? auth0User.sub ?? '',
-            name: auth0User.name ?? auth0User.email ?? '',
-            email: auth0User.email ?? '',
-            role: profile.role ?? auth0User[ROLE_CLAIM] ?? 'donor',
-            avatar: auth0User.picture,
+            id: profile._id ?? profile.id ?? u.sub ?? '',
+            name: u.name ?? u.email ?? '',
+            email: u.email ?? '',
+            role: profile.role ?? u[ROLE_CLAIM] ?? 'donor',
+            avatar: u.picture,
             wallet_address: profile.wallet_address,
           });
         } else {
           // Backend unreachable — fall back to Auth0 user info
           setAppUser({
-            id: auth0User.sub ?? '',
-            name: auth0User.name ?? auth0User.email ?? '',
-            email: auth0User.email ?? '',
-            role: (auth0User[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
-            avatar: auth0User.picture,
+            id: u.sub ?? '',
+            name: u.name ?? u.email ?? '',
+            email: u.email ?? '',
+            role: (u[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
+            avatar: u.picture,
           });
         }
       } catch {
         setAppUser({
-          id: auth0User.sub ?? '',
-          name: auth0User.name ?? auth0User.email ?? '',
-          email: auth0User.email ?? '',
-          role: (auth0User[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
-          avatar: auth0User.picture,
+          id: u.sub ?? '',
+          name: u.name ?? u.email ?? '',
+          email: u.email ?? '',
+          role: (u[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
+          avatar: u.picture,
         });
       } finally {
         setProfileLoading(false);

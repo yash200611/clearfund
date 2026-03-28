@@ -62,7 +62,7 @@ export default function Settings() {
           </div>
           <div>
             <p className="font-semibold text-white">{user?.name}</p>
-            <p className="text-xs text-white/40 capitalize">{user?.role} · Trust Score: {user?.trust_score}%</p>
+            <p className="text-xs text-white/40 capitalize">{user?.role}</p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">

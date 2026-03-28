@@ -5,7 +5,7 @@ export const USERS = [
 ];
 
 export type User = typeof USERS[number];
-export type Role = 'donor' | 'ngo' | 'verifier';
+export type Role = 'donor' | 'ngo' | 'verifier' | 'admin';
 
 export const CAMPAIGNS = [
   {
