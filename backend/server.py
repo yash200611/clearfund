@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from auth import TokenData, get_current_user, require_donor, require_ngo
+from auth import TokenData, get_current_user, require_donor, require_ngo, require_verifier
 from models import (
     Campaign,
     CreateCampaignRequest,
@@ -23,7 +23,7 @@ from models import (
 load_dotenv()
 
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "vested")
+DB_NAME = os.getenv("DB_NAME", "clearfund")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 app = FastAPI(title="Milestone Escrow API")
@@ -245,3 +245,129 @@ async def submit_evidence(
 
     updated = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
     return serialize(updated)
+
+
+# ─── Milestone Review (Verifier) ─────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+class ReviewRequest(_BaseModel):
+    decision: str
+    notes: str = ""
+
+@app.post("/api/milestones/{milestone_id}/review")
+async def review_milestone(
+    milestone_id: str,
+    body: ReviewRequest,
+    user: TokenData = Depends(require_verifier),
+):
+    if not ObjectId.is_valid(milestone_id):
+        raise HTTPException(status_code=400, detail="Invalid milestone ID")
+    milestone = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
+    if not milestone:
+        raise HTTPException(status_code=404, detail="Milestone not found")
+
+    new_status = "approved" if body.decision == "approve" else "rejected"
+    await db.milestones.update_one(
+        {"_id": ObjectId(milestone_id)},
+        {"$set": {"status": new_status, "reviewer_notes": body.notes, "reviewed_by": user.sub}},
+    )
+    updated = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
+    return serialize(updated)
+
+
+# ─── Donations (mine) ────────────────────────────────────────────────────────
+
+@app.get("/api/donations/mine")
+async def get_my_donations(user: TokenData = Depends(get_current_user)):
+    donor_doc = await db.users.find_one({"auth0_sub": user.sub})
+    if not donor_doc:
+        return []
+    donations = []
+    async for doc in db.donations.find({"donor_id": str(donor_doc["_id"])}):
+        donations.append(serialize(doc))
+    return donations
+
+
+# ─── Verification Queue ──────────────────────────────────────────────────────
+
+@app.get("/api/verification/queue")
+async def get_verification_queue(user: TokenData = Depends(require_verifier)):
+    milestones = []
+    async for doc in db.milestones.find({"status": "submitted"}):
+        milestones.append(serialize(doc))
+    return milestones
+
+
+# ─── Analytics ───────────────────────────────────────────────────────────────
+
+@app.get("/api/analytics/platform")
+async def platform_analytics(user: TokenData = Depends(get_current_user)):
+    total_campaigns = await db.campaigns.count_documents({})
+    active_campaigns = await db.campaigns.count_documents({"status": "active"})
+    total_donations_cursor = db.donations.aggregate([
+        {"$group": {"_id": None, "total": {"$sum": "$amount_sol"}, "released": {"$sum": "$released_sol"}}}
+    ])
+    agg = await total_donations_cursor.to_list(1)
+    totals = agg[0] if agg else {"total": 0, "released": 0}
+    return {
+        "total_campaigns": total_campaigns,
+        "active_campaigns": active_campaigns,
+        "total_raised_sol": totals.get("total", 0),
+        "total_released_sol": totals.get("released", 0),
+    }
+
+
+@app.get("/api/analytics/ngo")
+async def ngo_analytics(user: TokenData = Depends(require_ngo)):
+    ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
+    if not ngo_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    ngo_id = str(ngo_doc["_id"])
+    campaigns = []
+    async for doc in db.campaigns.find({"ngo_id": ngo_id}):
+        campaigns.append(serialize(doc))
+    total_raised = sum(c.get("total_raised_sol", 0) for c in campaigns)
+    return {
+        "my_campaigns": campaigns,
+        "total_raised_sol": total_raised,
+        "campaign_count": len(campaigns),
+    }
+
+
+# ─── Campaign Activity ────────────────────────────────────────────────────────
+
+@app.get("/api/campaigns/{campaign_id}/activity")
+async def get_campaign_activity(campaign_id: str):
+    if not ObjectId.is_valid(campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    logs = []
+    async for doc in db.agent_audit_logs.find(
+        {"campaign_id": campaign_id}
+    ).sort("created_at", -1).limit(20):
+        logs.append(serialize(doc))
+    return logs
+
+
+# ─── User Profile ────────────────────────────────────────────────────────────
+
+class UpdateProfileRequest(_BaseModel):
+    name: str | None = None
+    email: str | None = None
+
+class UpdatePasswordRequest(_BaseModel):
+    current: str
+    next: str
+
+@app.put("/api/users/me")
+async def update_profile(body: UpdateProfileRequest, user: TokenData = Depends(get_current_user)):
+    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    if update:
+        await db.users.update_one({"auth0_sub": user.sub}, {"$set": update})
+    doc = await db.users.find_one({"auth0_sub": user.sub})
+    return serialize(doc)
+
+@app.put("/api/users/me/password")
+async def update_password(body: UpdatePasswordRequest, user: TokenData = Depends(get_current_user)):
+    # Password changes are handled by Auth0 — this is a no-op stub
+    return {"success": True}

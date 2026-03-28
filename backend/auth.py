@@ -13,7 +13,7 @@ load_dotenv()
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 ALGORITHMS = ["RS256"]
-ROLE_CLAIM = "https://vested.app/role"
+ROLE_CLAIM = "https://clearfund.app/role"
 
 security = HTTPBearer()
 
@@ -101,6 +101,15 @@ async def require_ngo(user: TokenData = Depends(get_current_user)) -> TokenData:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="NGO access required",
+        )
+    return user
+
+
+async def require_verifier(user: TokenData = Depends(get_current_user)) -> TokenData:
+    if user.role not in ("verifier", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Verifier access required",
         )
     return user
 

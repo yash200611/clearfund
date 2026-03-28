@@ -1,40 +1,121 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { USERS, type User } from '@/data/seed';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
+import { setTokenGetter } from '@/api/client';
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'donor' | 'ngo' | 'verifier' | 'admin';
+  avatar?: string;
+  wallet_address?: string;
+}
 
 interface AuthContextType {
-  user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  user: AppUser | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (options?: { screen_hint?: string }) => void;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem('clearfund_user');
-    return stored ? JSON.parse(stored) : null;
-  });
+const ROLE_CLAIM = 'https://clearfund.app/role';
 
-  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
-    // TODO: Replace with real API call to POST /api/auth/login
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const found = USERS.find(u => u.email === email && u.password === password);
-    if (found) {
-      setUser(found);
-      localStorage.setItem('clearfund_user', JSON.stringify(found));
-      return true;
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const {
+    user: auth0User,
+    isAuthenticated,
+    isLoading: auth0Loading,
+    loginWithRedirect,
+    logout: auth0Logout,
+    getAccessTokenSilently,
+  } = useAuth0();
+
+  const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Register the token getter so client.ts can attach Bearer tokens
+  useEffect(() => {
+    if (isAuthenticated) {
+      setTokenGetter(getAccessTokenSilently);
     }
-    return false;
-  }, []);
+  }, [isAuthenticated, getAccessTokenSilently]);
+
+  // Fetch backend profile after Auth0 login
+  useEffect(() => {
+    if (!isAuthenticated || !auth0User) {
+      setAppUser(null);
+      return;
+    }
+
+    async function fetchProfile() {
+      setProfileLoading(true);
+      try {
+        const token = await getAccessTokenSilently();
+        const res = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const profile = await res.json();
+          setAppUser({
+            id: profile._id ?? profile.id ?? auth0User.sub ?? '',
+            name: auth0User.name ?? auth0User.email ?? '',
+            email: auth0User.email ?? '',
+            role: profile.role ?? auth0User[ROLE_CLAIM] ?? 'donor',
+            avatar: auth0User.picture,
+            wallet_address: profile.wallet_address,
+          });
+        } else {
+          // Backend unreachable — fall back to Auth0 user info
+          setAppUser({
+            id: auth0User.sub ?? '',
+            name: auth0User.name ?? auth0User.email ?? '',
+            email: auth0User.email ?? '',
+            role: (auth0User[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
+            avatar: auth0User.picture,
+          });
+        }
+      } catch {
+        setAppUser({
+          id: auth0User.sub ?? '',
+          name: auth0User.name ?? auth0User.email ?? '',
+          email: auth0User.email ?? '',
+          role: (auth0User[ROLE_CLAIM] as AppUser['role']) ?? 'donor',
+          avatar: auth0User.picture,
+        });
+      } finally {
+        setProfileLoading(false);
+      }
+    }
+
+    fetchProfile();
+  }, [isAuthenticated, auth0User, getAccessTokenSilently]);
+
+  const login = useCallback((options?: { screen_hint?: string }) => {
+    loginWithRedirect({
+      authorizationParams: {
+        screen_hint: options?.screen_hint,
+      },
+    });
+  }, [loginWithRedirect]);
 
   const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('clearfund_user');
-  }, []);
+    setAppUser(null);
+    auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+  }, [auth0Logout]);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider
+      value={{
+        user: appUser,
+        isAuthenticated: isAuthenticated && !!appUser,
+        isLoading: auth0Loading || profileLoading,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

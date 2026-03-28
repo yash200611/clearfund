@@ -1,138 +1,205 @@
-import {
-  CAMPAIGNS, MILESTONES, DONATIONS, PLATFORM_STATS, VERIFICATION_QUEUE, ACTIVITY_FEED, USERS,
-  type Campaign, type Milestone, type Donation,
-} from '@/data/seed';
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-const delay = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
+// Token getter — set by AuthContext after Auth0 authenticates
+let _getToken: (() => Promise<string>) | null = null;
 
-// TODO: Replace with real API call to POST /api/auth/login
-export async function loginUser(email: string, password: string) {
-  await delay();
-  const user = USERS.find(u => u.email === email && u.password === password);
-  if (!user) throw new Error('Invalid credentials');
-  return user;
+export function setTokenGetter(fn: () => Promise<string>) {
+  _getToken = fn;
 }
 
-// TODO: Replace with real API call to POST /api/auth/register
-export async function registerUser(name: string, email: string, _password: string, role: string) {
-  await delay();
-  return { id: 'new_' + Date.now(), name, email, role, trust_score: 0 };
-}
-
-// TODO: Replace with real API call to POST /api/auth/logout
-export async function logoutUser() {
-  await delay(100);
-  return { success: true };
-}
-
-// TODO: Replace with real API call to GET /api/auth/me
-export async function getCurrentUser() {
-  await delay();
-  return USERS[0];
-}
-
-// TODO: Replace with real API call to GET /api/campaigns
-export async function getCampaigns(filters?: { category?: string; search?: string; status?: string }) {
-  await delay();
-  let result = [...CAMPAIGNS];
-  if (filters?.category && filters.category !== 'All') {
-    result = result.filter(c => c.category === filters.category);
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!_getToken) return {};
+  try {
+    const token = await _getToken();
+    return { Authorization: `Bearer ${token}` };
+  } catch {
+    return {};
   }
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    result = result.filter(c => c.title.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
-  }
-  if (filters?.status && filters.status !== 'All') {
-    result = result.filter(c => c.status === filters.status);
-  }
-  return result;
 }
 
-// TODO: Replace with real API call to GET /api/campaigns/:id
-export async function getCampaignById(id: string): Promise<Campaign | undefined> {
-  await delay();
-  return CAMPAIGNS.find(c => c.id === id);
-}
-
-// TODO: Replace with real API call to POST /api/campaigns
-export async function createCampaign(data: Partial<Campaign>) {
-  await delay(500);
-  return { id: 'c_' + Date.now(), ...data, status: 'active', trust_score: 0, failure_count: 0, donors_count: 0, created_at: new Date().toISOString() };
-}
-
-// TODO: Replace with real API call to GET /api/campaigns/:id/milestones
-export async function getMilestones(campaignId: string): Promise<Milestone[]> {
-  await delay();
-  return MILESTONES.filter(m => m.campaign_id === campaignId);
-}
-
-// TODO: Replace with real API call to POST /api/campaigns/:id/milestones
-export async function createMilestone(campaignId: string, data: Partial<Milestone>) {
-  await delay(500);
-  return { id: 'm_' + Date.now(), campaign_id: campaignId, ...data, status: 'locked' };
-}
-
-// TODO: Replace with real API call to POST /api/milestones/:id/submit
-export async function submitMilestone(milestoneId: string, evidence: string) {
-  await delay(500);
-  return { id: milestoneId, status: 'submitted', evidence };
-}
-
-// TODO: Replace with real API call to POST /api/campaigns/:id/donate
-export async function makeDonation(campaignId: string, amount: number) {
-  await delay(500);
-  const campaign = CAMPAIGNS.find(c => c.id === campaignId);
-  return { id: 'd_' + Date.now(), campaign_id: campaignId, campaign_title: campaign?.title, amount, released_portion: 0, refundable_portion: amount, date: new Date().toISOString() };
-}
-
-// TODO: Replace with real API call to GET /api/donations/mine
-export async function getMyDonations(): Promise<Donation[]> {
-  await delay();
-  return DONATIONS;
-}
-
-// TODO: Replace with real API call to GET /api/verification/queue
-export async function getVerificationQueue() {
-  await delay();
-  return VERIFICATION_QUEUE;
-}
-
-// TODO: Replace with real API call to POST /api/milestones/:id/review
-export async function reviewMilestone(milestoneId: string, decision: 'approve' | 'reject', notes: string) {
-  await delay(500);
-  return { id: milestoneId, status: decision === 'approve' ? 'released' : 'rejected', reviewer_notes: notes };
-}
-
-// TODO: Replace with real API call to GET /api/analytics/platform
-export async function getPlatformAnalytics() {
-  await delay();
-  return PLATFORM_STATS;
-}
-
-// TODO: Replace with real API call to GET /api/analytics/ngo
-export async function getNGOAnalytics() {
-  await delay();
-  return {
-    ...PLATFORM_STATS,
-    my_campaigns: CAMPAIGNS.slice(0, 2),
-    total_raised_by_me: 62500,
+async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(await authHeaders()),
+    ...(opts.headers as Record<string, string> ?? {}),
   };
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? `Request failed: ${res.status}`);
+  }
+  return res.json();
 }
 
-// TODO: Replace with real API call to GET /api/campaigns/:id/activity
-export async function getCampaignActivity(_campaignId: string) {
-  await delay();
-  return ACTIVITY_FEED;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface Campaign {
+  _id: string;
+  ngo_id: string;
+  ngo_name?: string;
+  title: string;
+  description: string;
+  category: string;
+  image?: string;
+  goal?: number;
+  total_raised_sol: number;
+  vault_address?: string;
+  status: string;
+  trust_score: number;
+  failure_count: number;
+  donors_count?: number;
+  created_at: string;
+  milestones?: Milestone[];
 }
 
-// TODO: Replace with real API call to PUT /api/users/me
+export interface Milestone {
+  _id: string;
+  campaign_id: string;
+  title: string;
+  description: string;
+  amount_sol: number;
+  due_date: string;
+  status: string;
+  evidence_urls: string[];
+  ai_decision: Record<string, unknown>;
+  oracle_result: Record<string, unknown>;
+  solana_tx?: string;
+  created_at: string;
+}
+
+export interface Donation {
+  _id: string;
+  donor_id: string;
+  campaign_id: string;
+  campaign_title?: string;
+  ngo_name?: string;
+  amount_sol: number;
+  wallet_address: string;
+  solana_tx: string;
+  released_sol: number;
+  locked_sol: number;
+  refunded_sol: number;
+  created_at: string;
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export async function getCurrentUser() {
+  return apiFetch('/api/auth/me');
+}
+
+// ─── Campaigns ────────────────────────────────────────────────────────────────
+
+export async function getCampaigns(filters?: { category?: string; search?: string; status?: string }) {
+  const params = new URLSearchParams();
+  if (filters?.category && filters.category !== 'All') params.set('category', filters.category);
+  if (filters?.search) params.set('search', filters.search);
+  if (filters?.status && filters.status !== 'All') params.set('status', filters.status);
+  const query = params.toString() ? `?${params}` : '';
+  return apiFetch<Campaign[]>(`/api/campaigns${query}`);
+}
+
+export async function getCampaignById(id: string): Promise<Campaign> {
+  return apiFetch<Campaign>(`/api/campaigns/${id}`);
+}
+
+export async function createCampaign(data: {
+  title: string;
+  description: string;
+  category: string;
+  vault_address?: string;
+}) {
+  return apiFetch<Campaign>('/api/campaigns', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// ─── Milestones ───────────────────────────────────────────────────────────────
+
+export async function getMilestones(campaignId: string): Promise<Milestone[]> {
+  return apiFetch<Milestone[]>(`/api/campaigns/${campaignId}/milestones`);
+}
+
+export async function createMilestone(campaignId: string, data: {
+  title: string;
+  description: string;
+  amount_sol: number;
+  due_date: string;
+}) {
+  return apiFetch<Milestone>(`/api/campaigns/${campaignId}/milestones`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function submitMilestone(milestoneId: string, data: {
+  description: string;
+  evidence_urls: string[];
+}) {
+  return apiFetch(`/api/milestones/${milestoneId}/submit`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function reviewMilestone(milestoneId: string, decision: 'approve' | 'reject', notes: string) {
+  return apiFetch(`/api/milestones/${milestoneId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, notes }),
+  });
+}
+
+// ─── Donations ────────────────────────────────────────────────────────────────
+
+export async function makeDonation(data: {
+  campaign_id: string;
+  amount_sol: number;
+  solana_tx: string;
+  wallet_address: string;
+}) {
+  return apiFetch<Donation>('/api/donations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getMyDonations(): Promise<Donation[]> {
+  return apiFetch<Donation[]>('/api/donations/mine');
+}
+
+// ─── Verification ─────────────────────────────────────────────────────────────
+
+export async function getVerificationQueue(): Promise<Milestone[]> {
+  return apiFetch<Milestone[]>('/api/verification/queue');
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+export async function getPlatformAnalytics() {
+  return apiFetch('/api/analytics/platform');
+}
+
+export async function getNGOAnalytics() {
+  return apiFetch('/api/analytics/ngo');
+}
+
+export async function getCampaignActivity(campaignId: string) {
+  return apiFetch(`/api/campaigns/${campaignId}/activity`);
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
 export async function updateProfile(data: { name?: string; email?: string }) {
-  await delay(500);
-  return { ...USERS[0], ...data };
+  return apiFetch('/api/users/me', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }
 
-// TODO: Replace with real API call to PUT /api/users/me/password
-export async function updatePassword(_data: { current: string; next: string }) {
-  await delay(500);
-  return { success: true };
+export async function updatePassword(data: { current: string; next: string }) {
+  return apiFetch('/api/users/me/password', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }

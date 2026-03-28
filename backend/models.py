@@ -20,6 +20,7 @@ class PyObjectId(str):
 class Role(str, Enum):
     donor = "donor"
     ngo = "ngo"
+    verifier = "verifier"
     admin = "admin"
 
 
