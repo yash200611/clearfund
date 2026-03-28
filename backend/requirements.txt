@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+motor
+python-jose[cryptography]
+httpx
+google-generativeai
+solana
+python-multipart
+redis
+python-dotenv
