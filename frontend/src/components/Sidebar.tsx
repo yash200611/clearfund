@@ -82,8 +82,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         <div className="p-3 border-t border-white/[0.06]">
           <div className="flex items-center gap-3 px-3 py-2.5 mb-1">
-            <div className="w-8 h-8 rounded-full bg-white/10 border border-white/15 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
-              {user?.avatar ?? user?.name?.[0]}
+            <div className="w-8 h-8 rounded-full bg-white/10 border border-white/15 flex items-center justify-center text-xs font-bold text-white flex-shrink-0 overflow-hidden">
+              {user?.avatar
+                ? <img src={user.avatar} alt={user.name ?? ''} className="w-full h-full object-cover" />
+                : user?.name?.[0]}
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white truncate">{user?.name}</p>

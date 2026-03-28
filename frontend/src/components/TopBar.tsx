@@ -24,8 +24,10 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
           Escrow Active
         </span>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-white/10 border border-white/15 flex items-center justify-center text-xs font-bold text-white">
-            {user?.avatar ?? user?.name?.[0]}
+          <div className="w-7 h-7 rounded-full bg-white/10 border border-white/15 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
+            {user?.avatar
+              ? <img src={user.avatar} alt={user.name ?? ''} className="w-full h-full object-cover" />
+              : user?.name?.[0]}
           </div>
           <span className="hidden sm:block text-sm text-white/70 font-medium">{user?.name}</span>
         </div>
