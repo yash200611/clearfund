@@ -57,8 +57,10 @@ export default function Settings() {
       <GlassCard className="p-6 space-y-5">
         <h3 className="text-base font-semibold text-white">Profile</h3>
         <div className="flex items-center gap-4 pb-4 border-b border-white/[0.06]">
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center text-xl font-black text-white">
-            {user?.avatar ?? user?.name?.[0]}
+          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center text-xl font-black text-white overflow-hidden">
+            {user?.avatar
+              ? <img src={user.avatar} alt={user.name ?? ''} className="w-full h-full object-cover" />
+              : user?.name?.[0]}
           </div>
           <div>
             <p className="font-semibold text-white">{user?.name}</p>

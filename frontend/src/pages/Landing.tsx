@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Shield, ChevronRight, DollarSign, Users, BarChart3, Check } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 import { MeshGradient } from '@paper-design/shaders-react'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
@@ -13,6 +14,7 @@ import { PLATFORM_STATS } from '@/data/seed'
 
 export default function Landing() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [scrolled, setScrolled] = useState(false)
   const [featuredCampaigns, setFeaturedCampaigns] = useState<Campaign[]>([])
 
@@ -58,10 +60,10 @@ export default function Landing() {
           <span className="font-bold text-white text-lg">ClearFund</span>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/login')} className="text-white/60 hover:text-white transition-colors text-sm font-medium px-4 py-2">
+          <button onClick={() => login()} className="text-white/60 hover:text-white transition-colors text-sm font-medium px-4 py-2">
             Log in
           </button>
-          <MetalButton onClick={() => navigate('/register')}>Get Started</MetalButton>
+          <MetalButton onClick={() => login({ screen_hint: 'signup' })}>Get Started</MetalButton>
         </div>
       </nav>
 
@@ -89,7 +91,7 @@ export default function Landing() {
               EXPLORE CAMPAIGNS
               <ChevronRight className="w-5 h-5" />
             </LiquidButton>
-            <MetalButton variant="default" onClick={() => navigate('/register')}>
+            <MetalButton variant="default" onClick={() => login({ screen_hint: 'signup' })}>
               LAUNCH A PROJECT
             </MetalButton>
           </div>
