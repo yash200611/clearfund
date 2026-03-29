@@ -1010,7 +1010,7 @@ class PrivyTransferSignRequest(BaseModel):
 @app.post("/api/wallets/privy/transfer-sign")
 async def sign_privy_transfer(
     body: PrivyTransferSignRequest,
-    user: TokenData = Depends(require_donor_role),
+    user: TokenData = Depends(resolve_app_user),
 ):
     donor_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not donor_doc:
@@ -1150,7 +1150,7 @@ async def sign_privy_transfer(
 @app.post("/api/donations/transfer", status_code=status.HTTP_201_CREATED)
 async def create_donation_from_transfer(
     body: CreateDonationTransferRequest,
-    user: TokenData = Depends(require_donor_role),
+    user: TokenData = Depends(resolve_app_user),
 ):
     donor_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not donor_doc:
