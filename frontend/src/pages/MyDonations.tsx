@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DollarSign, Lock, TrendingUp } from 'lucide-react'
+import { DollarSign, ExternalLink, Lock, TrendingUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { GlassCard } from '@/components/ui/glass-card'
 import { getMyDonations } from '@/api/client'
@@ -85,7 +85,27 @@ export default function MyDonations() {
                 </div>
                 <div className="mt-3 text-[11px] text-white/40 flex items-center justify-between">
                   <span>{d.created_at?.slice(0, 10)}</span>
-                  <span className="font-mono">{d.solana_tx?.slice(0, 16)}...</span>
+                  {d.solana_tx ? (
+                    <a
+                      href={(() => {
+                        const network = (import.meta.env.VITE_SOLANA_NETWORK as string | undefined) ?? 'devnet'
+                        const rpc = import.meta.env.VITE_SOLANA_RPC_URL as string | undefined
+                        if (network === 'localnet') {
+                          return `https://explorer.solana.com/tx/${d.solana_tx}?cluster=custom&customUrl=${encodeURIComponent(rpc ?? 'http://127.0.0.1:8899')}`
+                        }
+                        return `https://explorer.solana.com/tx/${d.solana_tx}?cluster=${network}`
+                      })()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-[oklch(0.65_0.25_25)] hover:text-white transition-colors"
+                    >
+                      <span className="font-mono">{d.solana_tx.slice(0, 16)}...</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    <span className="font-mono">Pending...</span>
+                  )}
                 </div>
               </button>
             ))}

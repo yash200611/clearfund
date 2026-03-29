@@ -62,10 +62,10 @@ export default function RoleSelect() {
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 mb-6">
             <Shield className="w-6 h-6 text-[oklch(0.65_0.25_25)]" />
-            <span className="text-xl font-bold text-white">ClearFund</span>
+            <span className="text-xl font-bold text-white">Aidex</span>
           </div>
           <h1 className="text-4xl md:text-5xl font-black text-white mb-3">
-            How will you use<br />ClearFund?
+            How will you use<br />Aidex?
           </h1>
           <p className="text-white/50 text-base">
             Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Choose your role to get started.

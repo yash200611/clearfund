@@ -165,7 +165,7 @@ export default function Landing() {
       >
         <div className="flex items-center gap-2.5">
           <Shield className="w-5 h-5 text-[oklch(0.65_0.25_25)]" />
-          <span className="font-bold text-white text-lg">ClearFund</span>
+          <span className="font-bold text-white text-lg">Aidex</span>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -286,7 +286,7 @@ export default function Landing() {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Shield className="w-4 h-4 text-[oklch(0.65_0.25_25)]" />
-              <span className="font-bold text-white text-sm">ClearFund</span>
+              <span className="font-bold text-white text-sm">Aidex</span>
             </div>
             <p className="text-sm text-white/30">Transparent, milestone-based escrow for the social sector.</p>
           </div>
@@ -312,7 +312,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="max-w-5xl mx-auto mt-8 pt-8 border-t border-white/[0.05]">
-          <p className="text-xs text-white/20">&copy; 2026 ClearFund. All rights reserved. Funds held in regulated escrow accounts.</p>
+          <p className="text-xs text-white/20">&copy; 2026 Aidex. All rights reserved. Funds held in regulated escrow accounts.</p>
         </div>
       </footer>
     </div>

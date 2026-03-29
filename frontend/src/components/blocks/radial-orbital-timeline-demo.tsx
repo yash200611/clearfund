@@ -105,7 +105,7 @@ export function RadialOrbitalTimelineDemo() {
       <div className="max-w-6xl mx-auto px-6 md:px-10 mb-8">
         <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-2">System Overview</p>
         <h2 className="text-3xl md:text-4xl font-bold text-white tracking-tight mb-3">
-          How ClearFund protects every donation.
+          How Aidex protects every donation.
         </h2>
         <p className="text-sm md:text-base text-white/50 max-w-3xl">
           This orbital timeline maps your platform flow from campaign launch to escrow controls, verification, and

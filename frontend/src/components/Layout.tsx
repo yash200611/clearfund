@@ -16,7 +16,7 @@ const PAGE_TITLES: Record<string, string> = {
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
-  const title = PAGE_TITLES[location.pathname] ?? 'ClearFund'
+  const title = PAGE_TITLES[location.pathname] ?? 'Aidex'
 
   return (
     <div className="cf-app-shell relative flex h-screen overflow-hidden">

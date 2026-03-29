@@ -26,7 +26,7 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="flex items-center gap-2 justify-center mb-8">
           <Shield className="w-6 h-6 text-[oklch(0.65_0.25_25)]" />
-          <span className="text-xl font-bold text-white">ClearFund</span>
+          <span className="text-xl font-bold text-white">Aidex</span>
         </div>
 
         <GlassCard className="p-8">

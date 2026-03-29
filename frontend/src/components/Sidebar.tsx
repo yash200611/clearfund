@@ -60,7 +60,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 <Shield className="w-4 h-4 text-white" />
               </div>
               <div>
-                <p className="cf-display text-white text-base leading-none">ClearFund</p>
+                <p className="cf-display text-white text-base leading-none">Aidex</p>
                 <p className="text-[10px] text-white/38 uppercase tracking-[0.18em] mt-1">Control Plane</p>
               </div>
             </div>
