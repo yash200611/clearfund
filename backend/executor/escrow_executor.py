@@ -66,6 +66,14 @@ class EscrowExecutor:
         tx_bytes = bytes(tx)
         return base64.b64encode(tx_bytes).decode()
 
+    @staticmethod
+    def _vault_signer_wallet_id(campaign: dict) -> str:
+        """
+        Preferred signer is the campaign-specific Privy vault wallet.
+        Fallback to legacy global authority for backward compatibility.
+        """
+        return campaign.get("privy_vault_wallet_id", "") or PRIVY_AUTHORITY_ID
+
     async def release_milestone(
         self,
         campaign: dict,
@@ -88,12 +96,14 @@ class EscrowExecutor:
 
         if not vault_address or not ngo_wallet:
             raise ValueError("Campaign missing vault_address or ngo_wallet")
-        if not PRIVY_AUTHORITY_ID:
-            raise RuntimeError("PRIVY_AUTHORITY_WALLET_ID not set")
+
+        signer_wallet_id = self._vault_signer_wallet_id(campaign)
+        if not signer_wallet_id:
+            raise RuntimeError("Campaign missing Privy vault signer wallet ID")
 
         # Build and send transaction
         tx_b64    = self._build_transfer_tx(vault_address, ngo_wallet, amount_sol)
-        signature = await self.privy.sign_and_send_transaction(PRIVY_AUTHORITY_ID, tx_b64)
+        signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
 
         released_at   = datetime.now(timezone.utc)
         explorer_url  = f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
@@ -129,8 +139,10 @@ class EscrowExecutor:
         vault_address = campaign.get("vault_address", "")
         if not vault_address:
             raise ValueError("Campaign missing vault_address")
-        if not PRIVY_AUTHORITY_ID:
-            raise RuntimeError("PRIVY_AUTHORITY_WALLET_ID not set")
+
+        signer_wallet_id = self._vault_signer_wallet_id(campaign)
+        if not signer_wallet_id:
+            raise RuntimeError("Campaign missing Privy vault signer wallet ID")
 
         results = []
         for donation in donations:
@@ -143,7 +155,7 @@ class EscrowExecutor:
                 continue
 
             tx_b64    = self._build_transfer_tx(vault_address, donor_wallet, locked)
-            signature = await self.privy.sign_and_send_transaction(PRIVY_AUTHORITY_ID, tx_b64)
+            signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
 
             results.append({
                 "donor_id":   donation.get("donor_id") or donation.get("_id"),

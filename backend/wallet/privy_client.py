@@ -41,12 +41,15 @@ def _auth_headers() -> dict:
 
 class PrivyClient:
 
-    async def create_embedded_wallet(self, auth0_user_id: str) -> dict:
+    async def create_embedded_wallet(self, owner_id: str) -> dict:
         """
-        Create a server-side Solana wallet for a user.
+        Create a server-side Solana wallet.
         Returns { wallet_id, address }
         """
         _check_configured()
+        owner_id = (owner_id or "").strip()
+        if not owner_id:
+            raise ValueError("owner_id is required to create a wallet")
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{PRIVY_BASE_URL}/wallets",
@@ -55,7 +58,7 @@ class PrivyClient:
                     "chain_type": "solana",
                     "owner": {
                         "type": "user",
-                        "did": f"did:privy:{auth0_user_id}",
+                        "did": f"did:privy:{owner_id}",
                     },
                 },
             )
@@ -65,6 +68,14 @@ class PrivyClient:
                 "wallet_id": data["id"],
                 "address": data["address"],
             }
+
+    async def create_campaign_vault_wallet(self, campaign_id: str) -> dict:
+        """
+        Create a dedicated server-side Solana vault wallet for a campaign.
+        Returns { wallet_id, address }
+        """
+        owner_ref = f"campaign-vault:{campaign_id}"
+        return await self.create_embedded_wallet(owner_ref)
 
     async def sign_and_send_transaction(self, wallet_id: str, tx_base64: str) -> str:
         """

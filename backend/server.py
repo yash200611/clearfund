@@ -238,6 +238,12 @@ def serialize(doc: dict) -> dict:
     return doc
 
 
+def public_campaign(doc: dict) -> dict:
+    out = serialize(doc)
+    out.pop("privy_vault_wallet_id", None)
+    return out
+
+
 def _optional_user_from_request(request: Request) -> Optional[TokenData]:
     auth_header = request.headers.get("authorization", "")
     if not auth_header.lower().startswith("bearer "):
@@ -530,7 +536,7 @@ async def list_campaigns(
     cursor = db.campaigns.find(query).sort("created_at", -1)
     campaigns = []
     async for doc in cursor:
-        campaigns.append(serialize(doc))
+        campaigns.append(public_campaign(doc))
     return campaigns
 
 
@@ -544,14 +550,35 @@ async def create_campaign(
     if not ngo_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
+    campaign_oid = ObjectId()
+    campaign_id = str(campaign_oid)
+
+    # Vault must be provisioned before campaign is created.
+    try:
+        privy = PrivyClient()
+        vault_wallet = await privy.create_campaign_vault_wallet(campaign_id)
+    except Exception as e:
+        logger.exception(
+            "[CampaignCreate] vault provisioning failed sub=%s campaign_id=%s error=%s",
+            user.sub,
+            campaign_id,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to provision campaign vault wallet",
+        )
+
     campaign = {
+        "_id": campaign_oid,
         "ngo_id": str(ngo_doc["_id"]),
         "ngo_name": ngo_doc.get("name") or ngo_doc.get("email") or "NGO",
         "title": body.title,
         "description": body.description,
         "category": body.category,
         "total_raised_sol": 0.0,
-        "vault_address": body.vault_address,
+        "vault_address": vault_wallet["address"],
+        "privy_vault_wallet_id": vault_wallet["wallet_id"],
         "status": "under_review",
         "trust_score": 0.0,
         "failure_count": 0,
@@ -564,14 +591,13 @@ async def create_campaign(
         },
         "created_at": datetime.now(timezone.utc),
     }
-    result = await db.campaigns.insert_one(campaign)
-    campaign_id = str(result.inserted_id)
+    await db.campaigns.insert_one(campaign)
     campaign["_id"] = campaign_id
 
     logger.info("[CampaignReview] queued campaign_id=%s title=%s", campaign_id, campaign.get("title"))
     background_tasks.add_task(_run_campaign_intake_review, campaign_id)
 
-    return campaign
+    return public_campaign(campaign)
 
 
 @app.get("/api/campaigns/{campaign_id}")
@@ -586,7 +612,7 @@ async def get_campaign(campaign_id: str):
     async for m in db.milestones.find({"campaign_id": campaign_id}):
         milestones.append(serialize(m))
 
-    campaign = serialize(doc)
+    campaign = public_campaign(doc)
     campaign["milestones"] = milestones
     return campaign
 
