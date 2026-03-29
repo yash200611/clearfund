@@ -6,7 +6,6 @@ import { MeshGradient } from '@paper-design/shaders-react'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { GlassCard } from '@/components/ui/glass-card'
-import { NGOCarousel } from '@/components/NGOCarousel'
 import { CampaignCard } from '@/components/CampaignCard'
 import { RadialOrbitalTimelineDemo } from '@/components/blocks/radial-orbital-timeline-demo'
 import { SectionMockupDemoPage } from '@/components/blocks/section-with-mockup-demo'
@@ -159,8 +158,8 @@ export default function Landing() {
       </div>
 
       <nav
-        className={`fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 md:px-10 h-16 transition-all duration-500 ${
-          scrolled ? 'bg-black/80 backdrop-blur-xl border-b border-white/[0.06]' : ''
+        className={`fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 md:px-10 h-16 transition-all duration-500 backdrop-blur-xl ${
+          scrolled ? 'bg-black/80 border-b border-white/[0.06] shadow-[0_4px_30px_rgba(0,0,0,0.6)]' : 'bg-black/40 shadow-[0_2px_20px_rgba(0,0,0,0.4)]'
         }`}
       >
         <div className="flex items-center gap-2.5">
@@ -183,6 +182,7 @@ export default function Landing() {
           <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-[oklch(0.65_0.25_25)]/[0.04] blur-3xl" />
         </div>
         <div className="relative text-center max-w-5xl mx-auto">
+          <div className="rounded-3xl border border-white/[0.08] bg-white/[0.02] backdrop-blur-md p-10 md:p-14 mb-12 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06),0_0_80px_rgba(0,0,0,0.4)]">
           <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/40 bg-white/[0.04] border border-white/[0.08] px-4 py-2 rounded-full mb-8 backdrop-blur-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-[oklch(0.65_0.25_25)] animate-pulse" />
             Milestone-Based Escrow Donations
@@ -228,17 +228,13 @@ export default function Landing() {
               </div>
             ))}
           </div>
+          </div>
         </div>
       </section>
 
       <SectionMockupDemoPage />
       <RadialOrbitalTimelineDemo />
 
-      <section className="relative py-8 px-6">
-        <div className="max-w-5xl mx-auto">
-          <NGOCarousel />
-        </div>
-      </section>
 
       <section className="relative py-24 px-6">
         <div className="max-w-5xl mx-auto">
