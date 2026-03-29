@@ -30,7 +30,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
-  const items = NAV_ITEMS.filter(item => !item.roles || (user && item.roles.includes(user.role)))
+  const items = NAV_ITEMS.filter(item => !item.roles || (user && user.role && item.roles.includes(user.role)))
 
   const handleLogout = () => {
     logout()
