@@ -27,6 +27,22 @@ PRIVY_API_URL    = "https://api.privy.io/v1"
 LAMPORTS_PER_SOL = 1_000_000_000
 
 
+def _solana_caip2() -> str:
+    """
+    Privy Solana RPC requires caip2 in the request body for signAndSendTransaction.
+    """
+    override = os.getenv("PRIVY_SOLANA_CAIP2", "").strip()
+    if override:
+        return override
+
+    network = os.getenv("SOLANA_NETWORK", "devnet").strip().lower()
+    if network in ("mainnet", "mainnet-beta"):
+        return "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    if network == "testnet":
+        return "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"
+    return "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+
+
 def _check_configured() -> None:
     if not PRIVY_APP_ID or not PRIVY_APP_SECRET:
         raise RuntimeError(
@@ -115,27 +131,51 @@ class PrivyClient:
         """
         _check_configured()
         url = f"{PRIVY_API_URL}/wallets/{wallet_id}/rpc"
-        logger.info("[Privy] signing tx | wallet_id=%s url=%s", wallet_id, url)
+        caip2 = _solana_caip2()
+        payload = {
+            "method": "signAndSendTransaction",
+            "caip2": caip2,
+            "params": {
+                "transaction": tx_base64,
+                "encoding": "base64",
+            },
+        }
+        logger.info(
+            "[Privy] signing tx | wallet_id=%s url=%s caip2=%s",
+            wallet_id,
+            url,
+            caip2,
+        )
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                url,
-                headers=_auth_headers(),
-                json={
-                    "method": "signAndSendTransaction",
-                    "params": {
-                        "transaction": tx_base64,
-                        "encoding": "base64",
-                    },
-                },
-            )
+            resp = await client.post(url, headers=_auth_headers(), json=payload)
             logger.info(
                 "[Privy] sign response status=%s | body=%s",
                 resp.status_code,
                 resp.text,
             )
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Bubble up Privy's body for server logs to speed up diagnosis.
+                raise RuntimeError(
+                    f"Privy signAndSendTransaction failed status={e.response.status_code} body={e.response.text}"
+                ) from e
+
             data = resp.json()
-            return data["result"]["signature"]
+
+            # Current Privy docs return method+data.hash, but keep legacy fallbacks.
+            data_obj = data.get("data") if isinstance(data, dict) else None
+            if isinstance(data_obj, dict) and isinstance(data_obj.get("hash"), str):
+                return data_obj["hash"]
+
+            result_obj = data.get("result") if isinstance(data, dict) else None
+            if isinstance(result_obj, dict):
+                if isinstance(result_obj.get("signature"), str):
+                    return result_obj["signature"]
+                if isinstance(result_obj.get("hash"), str):
+                    return result_obj["hash"]
+
+            raise RuntimeError(f"Privy signAndSendTransaction response missing tx hash/signature: {data}")
 
     async def get_wallet_balance(self, address: str) -> float:
         """
