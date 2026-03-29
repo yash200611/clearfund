@@ -2,6 +2,7 @@
 // In local dev, VITE_API_URL can point to the backend directly (e.g. http://localhost:8000).
 const configuredApiBase = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 const API_BASE = import.meta.env.DEV ? (configuredApiBase || '') : '';
+const API_TIMEOUT_MS = Number((import.meta.env.VITE_API_TIMEOUT_MS as string | undefined) ?? '20000');
 
 // Token getter — set by AuthContext after Auth0 authenticates
 let _getToken: (() => Promise<string>) | null = null;
@@ -26,12 +27,19 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     ...(await authHeaders()),
     ...(opts.headers as Record<string, string> ?? {}),
   };
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
-  } catch {
+    res = await fetch(`${API_BASE}${path}`, { ...opts, headers, signal: controller.signal });
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(API_TIMEOUT_MS / 1000)}s`);
+    }
     const target = API_BASE || 'same-origin /api';
     throw new Error(`Unable to reach backend (${target}). Check Vercel rewrite/CORS config.`);
+  } finally {
+    window.clearTimeout(timeoutId);
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

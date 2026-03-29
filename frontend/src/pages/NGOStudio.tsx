@@ -42,7 +42,8 @@ export default function NGOStudio() {
       setTab(0)
       loadMyCampaigns()
     } catch (err) {
-      toast.error('Failed to create campaign. Please try again.')
+      const msg = err instanceof Error ? err.message : 'Failed to create campaign. Please try again.'
+      toast.error(msg)
     } finally {
       setSaving(false)
     }

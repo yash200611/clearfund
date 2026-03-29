@@ -556,7 +556,20 @@ async def create_campaign(
     # Vault must be provisioned before campaign is created.
     try:
         privy = PrivyClient()
-        vault_wallet = await privy.create_campaign_vault_wallet(campaign_id)
+        vault_wallet = await asyncio.wait_for(
+            privy.create_campaign_vault_wallet(campaign_id),
+            timeout=12,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[CampaignCreate] vault provisioning timed out sub=%s campaign_id=%s",
+            user.sub,
+            campaign_id,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="Vault provisioning timed out. Please retry in a few seconds.",
+        )
     except Exception as e:
         logger.exception(
             "[CampaignCreate] vault provisioning failed sub=%s campaign_id=%s error=%s",

@@ -50,7 +50,8 @@ class PrivyClient:
         owner_id = (owner_id or "").strip()
         if not owner_id:
             raise ValueError("owner_id is required to create a wallet")
-        async with httpx.AsyncClient(timeout=30) as client:
+        timeout = httpx.Timeout(connect=6.0, read=10.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{PRIVY_BASE_URL}/wallets",
                 headers=_auth_headers(),

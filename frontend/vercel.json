@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://clearfund-u0aq.onrender.com/api/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
