@@ -85,6 +85,7 @@ export interface Donation {
   amount_sol: number;
   wallet_address: string;
   solana_tx: string;
+  tx_signature?: string;
   released_sol: number;
   locked_sol: number;
   refunded_sol: number;
@@ -180,6 +181,8 @@ export interface DonateTransferResult extends Donation {
 export async function donateTransfer(data: {
   campaign_id: string;
   amount_sol: number;
+  tx_signature: string;
+  wallet_address: string;
 }): Promise<DonateTransferResult> {
   return apiFetch<DonateTransferResult>('/api/donations/transfer', {
     method: 'POST',

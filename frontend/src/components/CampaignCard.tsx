@@ -8,9 +8,12 @@ import type { Campaign } from '@/api/client'
 
 interface CampaignCardProps {
   campaign: Campaign
+  actionLabel?: string
+  onAction?: (campaign: Campaign) => void
+  actionDisabled?: boolean
 }
 
-export function CampaignCard({ campaign }: CampaignCardProps) {
+export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled = false }: CampaignCardProps) {
   const navigate = useNavigate()
   const raised = campaign.total_raised_sol
   const goal = campaign.goal ?? 0
@@ -80,6 +83,19 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
             </div>
           </div>
         </div>
+
+        {actionLabel && onAction && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onAction(campaign)
+            }}
+            disabled={actionDisabled}
+            className="mt-4 w-full py-2.5 rounded-xl bg-[oklch(0.65_0.25_25)]/90 text-white text-sm font-semibold transition-all hover:bg-[oklch(0.65_0.25_25)] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {actionLabel}
+          </button>
+        )}
       </div>
     </GlassCard>
   )

@@ -12,6 +12,7 @@ import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { useAuth } from '@/contexts/AuthContext'
 import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer } from '@/api/client'
 import type { Campaign, Milestone } from '@/api/client'
+import { transferSolToVault } from '@/lib/solanaTransfer'
 
 interface ActivityItem { id: string; type: string; message: string; time: string }
 
@@ -41,18 +42,24 @@ export default function CampaignDetail() {
       toast.error('Enter a valid SOL amount')
       return
     }
-    if (!user?.wallet_address) {
-      toast.error('Your wallet is still being provisioned. Please wait a moment and try again.')
+    if (!campaign.vault_address) {
+      toast.error('This campaign has no vault address configured')
       return
     }
 
     setDonating(true)
     setTxResult(null)
     try {
-      const result = await donateTransfer({ campaign_id: id, amount_sol: sol })
+      const tx = await transferSolToVault(campaign.vault_address, sol)
+      const result = await donateTransfer({
+        campaign_id: id,
+        amount_sol: sol,
+        tx_signature: tx.signature,
+        wallet_address: tx.walletAddress,
+      })
       setTxResult({
-        signature: result.solana_tx,
-        explorerUrl: result.explorer_url,
+        signature: result.tx_signature ?? result.solana_tx,
+        explorerUrl: result.explorer_url ?? tx.explorerUrl,
         amount: sol,
       })
       // Update local campaign state
@@ -205,14 +212,14 @@ export default function CampaignDetail() {
                       </div>
                     </div>
 
-                    {!user?.wallet_address && (
+                    {!campaign.vault_address && (
                       <div className="flex items-start gap-2 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                         <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-amber-300/80">Your wallet is being provisioned. This may take a moment.</p>
+                        <p className="text-xs text-amber-300/80">This campaign is missing a vault address. Donation is disabled.</p>
                       </div>
                     )}
 
-                    <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !user?.wallet_address}>
+                    <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !campaign.vault_address}>
                       {donating ? (
                         <div className="flex items-center gap-2">
                           <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -144,3 +144,10 @@ class CreateDonationRequest(BaseModel):
     amount_sol: float
     solana_tx: str
     wallet_address: str
+
+
+class CreateDonationTransferRequest(BaseModel):
+    campaign_id: str
+    amount_sol: float
+    tx_signature: str
+    wallet_address: str

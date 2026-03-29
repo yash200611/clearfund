@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth import (
@@ -31,6 +32,7 @@ from models import (
     Campaign,
     CreateCampaignRequest,
     CreateDonationRequest,
+    CreateDonationTransferRequest,
     CreateMilestoneRequest,
     Donation,
     Milestone,
@@ -50,6 +52,11 @@ logger = logging.getLogger("clearfund.server")
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "clearfund")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+SOLANA_NETWORK = os.getenv("SOLANA_NETWORK", "devnet")
+SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", f"https://api.{SOLANA_NETWORK}.solana.com")
+
+LAMPORTS_PER_SOL = 1_000_000_000
+EXPLORER_BASE = "https://explorer.solana.com/tx"
 
 app = FastAPI(title="Milestone Escrow API")
 
@@ -230,6 +237,103 @@ def serialize(doc: dict) -> dict:
     return doc
 
 
+def _solana_explorer_url(signature: str) -> str:
+    return f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
+
+
+def _normalize_account_key(account_key) -> str:
+    if isinstance(account_key, str):
+        return account_key
+    if isinstance(account_key, dict):
+        return str(account_key.get("pubkey", ""))
+    return str(account_key or "")
+
+
+async def _fetch_transaction(signature: str) -> dict:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {
+                "encoding": "jsonParsed",
+                "maxSupportedTransactionVersion": 0,
+            },
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(SOLANA_RPC_URL, json=payload)
+            response.raise_for_status()
+            body = response.json()
+    except Exception as e:
+        logger.exception("[DonationTransfer] Solana RPC failed sig=%s error=%s", signature, str(e))
+        raise HTTPException(status_code=503, detail="Unable to verify transaction on Solana RPC")
+
+    if "error" in body:
+        logger.warning(
+            "[DonationTransfer] Solana RPC returned error sig=%s rpc_error=%s",
+            signature,
+            body["error"],
+        )
+        raise HTTPException(status_code=422, detail="Transaction could not be verified yet")
+
+    tx = body.get("result")
+    if not tx:
+        raise HTTPException(status_code=422, detail="Transaction not found on Solana")
+    return tx
+
+
+def _verify_donor_to_vault_transfer(
+    tx: dict,
+    *,
+    donor_wallet: str,
+    vault_address: str,
+    expected_lamports: int,
+) -> None:
+    meta = tx.get("meta") or {}
+    if meta.get("err") is not None:
+        raise HTTPException(status_code=422, detail="Transaction failed on-chain")
+
+    message = (tx.get("transaction") or {}).get("message") or {}
+    raw_keys = message.get("accountKeys") or []
+    account_keys = [_normalize_account_key(k) for k in raw_keys]
+    if not account_keys:
+        raise HTTPException(status_code=422, detail="Transaction missing account keys")
+
+    signer_keys = set()
+    for key in raw_keys:
+        if isinstance(key, dict) and key.get("signer"):
+            signer_keys.add(_normalize_account_key(key))
+
+    if not signer_keys:
+        header = message.get("header") or {}
+        num_required = int(header.get("numRequiredSignatures", 0))
+        signer_keys = set(account_keys[:num_required])
+
+    if donor_wallet not in signer_keys:
+        raise HTTPException(status_code=422, detail="Transaction signer does not match donor wallet")
+
+    try:
+        donor_idx = account_keys.index(donor_wallet)
+        vault_idx = account_keys.index(vault_address)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Transaction does not match donor-to-vault transfer")
+
+    pre_balances = meta.get("preBalances") or []
+    post_balances = meta.get("postBalances") or []
+    if donor_idx >= len(pre_balances) or donor_idx >= len(post_balances):
+        raise HTTPException(status_code=422, detail="Transaction balance metadata missing donor account")
+    if vault_idx >= len(pre_balances) or vault_idx >= len(post_balances):
+        raise HTTPException(status_code=422, detail="Transaction balance metadata missing vault account")
+
+    donor_spent = int(pre_balances[donor_idx]) - int(post_balances[donor_idx])
+    vault_received = int(post_balances[vault_idx]) - int(pre_balances[vault_idx])
+    if donor_spent < expected_lamports or vault_received < expected_lamports:
+        raise HTTPException(status_code=422, detail="Transaction amount does not match requested SOL")
+
+
 # ─── Health ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -359,12 +463,36 @@ async def create_donation(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    if body.amount_sol <= 0:
+        raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
+
+    vault_address = campaign.get("vault_address")
+    if not vault_address:
+        raise HTTPException(status_code=422, detail="Campaign has no vault_address")
+
+    existing = await db.donations.find_one({"solana_tx": body.solana_tx})
+    if existing:
+        raise HTTPException(status_code=409, detail="This transaction is already recorded")
+
+    expected_lamports = int(round(body.amount_sol * LAMPORTS_PER_SOL))
+    if expected_lamports <= 0:
+        raise HTTPException(status_code=400, detail="amount_sol is too small")
+
+    tx = await _fetch_transaction(body.solana_tx)
+    _verify_donor_to_vault_transfer(
+        tx,
+        donor_wallet=body.wallet_address,
+        vault_address=vault_address,
+        expected_lamports=expected_lamports,
+    )
+
     donation = {
         "donor_id": str(donor_doc["_id"]),
         "campaign_id": body.campaign_id,
         "amount_sol": body.amount_sol,
         "wallet_address": body.wallet_address,
         "solana_tx": body.solana_tx,
+        "tx_signature": body.solana_tx,
         "released_sol": 0.0,
         "locked_sol": body.amount_sol,
         "refunded_sol": 0.0,
@@ -378,6 +506,79 @@ async def create_donation(
         {"$inc": {"total_raised_sol": body.amount_sol}},
     )
     return donation
+
+
+@app.post("/api/donations/transfer", status_code=status.HTTP_201_CREATED)
+async def create_donation_from_transfer(
+    body: CreateDonationTransferRequest,
+    user: TokenData = Depends(require_donor_role),
+):
+    donor_doc = await db.users.find_one({"auth0_sub": user.sub})
+    if not donor_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if body.amount_sol <= 0:
+        raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
+
+    if not ObjectId.is_valid(body.campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    vault_address = campaign.get("vault_address")
+    if not vault_address:
+        raise HTTPException(status_code=422, detail="Campaign has no vault_address")
+
+    existing = await db.donations.find_one({"solana_tx": body.tx_signature})
+    if existing:
+        raise HTTPException(status_code=409, detail="This transaction is already recorded")
+
+    expected_lamports = int(round(body.amount_sol * LAMPORTS_PER_SOL))
+    if expected_lamports <= 0:
+        raise HTTPException(status_code=400, detail="amount_sol is too small")
+
+    tx = await _fetch_transaction(body.tx_signature)
+    _verify_donor_to_vault_transfer(
+        tx,
+        donor_wallet=body.wallet_address,
+        vault_address=vault_address,
+        expected_lamports=expected_lamports,
+    )
+
+    donation = {
+        "donor_id": str(donor_doc["_id"]),
+        "campaign_id": body.campaign_id,
+        "amount_sol": body.amount_sol,
+        "wallet_address": body.wallet_address,
+        # Keep legacy field + explicit tx_signature field for compatibility.
+        "solana_tx": body.tx_signature,
+        "tx_signature": body.tx_signature,
+        "released_sol": 0.0,
+        "locked_sol": body.amount_sol,
+        "refunded_sol": 0.0,
+        "created_at": datetime.now(timezone.utc),
+    }
+    result = await db.donations.insert_one(donation)
+    donation["_id"] = str(result.inserted_id)
+
+    await db.campaigns.update_one(
+        {"_id": ObjectId(body.campaign_id)},
+        {"$inc": {"total_raised_sol": body.amount_sol}},
+    )
+
+    logger.info(
+        "[DonationTransfer] recorded donor_id=%s campaign_id=%s amount_sol=%.9f wallet=%s tx=%s",
+        str(donor_doc["_id"]),
+        body.campaign_id,
+        body.amount_sol,
+        body.wallet_address,
+        body.tx_signature,
+    )
+
+    out = serialize(donation)
+    out["explorer_url"] = _solana_explorer_url(body.tx_signature)
+    return out
 
 
 # ─── Milestones ──────────────────────────────────────────────────────────────

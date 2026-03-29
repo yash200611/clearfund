@@ -3,15 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import {
   DollarSign, TrendingUp, Shield, Users,
   ChevronRight, Briefcase, Heart, Plus, Wallet,
-  BarChart3, Clock
+  BarChart3, Clock, ExternalLink, X
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
 import { useAuth } from '@/contexts/AuthContext'
-import { getCampaigns, getMyDonations, getPlatformAnalytics } from '@/api/client'
+import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics } from '@/api/client'
 import type { Campaign, Donation } from '@/api/client'
+import { transferSolToVault } from '@/lib/solanaTransfer'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -19,6 +21,10 @@ export default function Dashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [donations, setDonations] = useState<Donation[]>([])
   const [stats, setStats] = useState<Record<string, unknown> | null>(null)
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
+  const [investAmount, setInvestAmount] = useState('1')
+  const [investing, setInvesting] = useState(false)
+  const [investResult, setInvestResult] = useState<{ signature: string; explorerUrl: string } | null>(null)
 
   const isNGO = user?.role === 'ngo'
   const isDonor = user?.role === 'donor'
@@ -54,6 +60,60 @@ export default function Dashboard() {
   // NGO sees their own campaigns, donor sees all featured
   const myCampaigns = isNGO ? campaigns.filter(c => c.ngo_id === user?.id) : []
   const featuredCampaigns = campaigns.slice(0, 3)
+
+  const openInvest = (campaign: Campaign) => {
+    setSelectedCampaign(campaign)
+    setInvestAmount('1')
+    setInvestResult(null)
+  }
+
+  const closeInvest = () => {
+    if (investing) return
+    setSelectedCampaign(null)
+    setInvestResult(null)
+  }
+
+  const confirmInvest = async () => {
+    if (!selectedCampaign) return
+    if (!selectedCampaign.vault_address) {
+      toast.error('This campaign has no vault address configured')
+      return
+    }
+
+    const amountSol = parseFloat(investAmount)
+    if (!Number.isFinite(amountSol) || amountSol <= 0) {
+      toast.error('Enter a valid SOL amount')
+      return
+    }
+
+    setInvesting(true)
+    try {
+      const tx = await transferSolToVault(selectedCampaign.vault_address, amountSol)
+      const donation = await donateTransfer({
+        campaign_id: selectedCampaign._id,
+        amount_sol: amountSol,
+        tx_signature: tx.signature,
+        wallet_address: tx.walletAddress,
+      })
+
+      setCampaigns(prev => prev.map(c => (
+        c._id === selectedCampaign._id
+          ? { ...c, total_raised_sol: c.total_raised_sol + amountSol, donors_count: (c.donors_count ?? 0) + 1 }
+          : c
+      )))
+      setDonations(prev => [donation, ...prev])
+      setInvestResult({
+        signature: donation.tx_signature ?? donation.solana_tx,
+        explorerUrl: donation.explorer_url ?? tx.explorerUrl,
+      })
+      toast.success(`${amountSol} SOL sent to campaign vault`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Transfer failed'
+      toast.error(msg)
+    } finally {
+      setInvesting(false)
+    }
+  }
 
   return (
     <div className="p-6 space-y-10 max-w-7xl mx-auto">
@@ -211,9 +271,98 @@ export default function Dashboard() {
           </button>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {featuredCampaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
+          {featuredCampaigns.map(c => (
+            <CampaignCard
+              key={c._id}
+              campaign={c}
+              actionLabel={isDonor ? 'Invest' : undefined}
+              onAction={isDonor ? openInvest : undefined}
+            />
+          ))}
         </div>
       </div>
+
+      {isDonor && selectedCampaign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeInvest} />
+          <div className="relative w-full max-w-md rounded-2xl border border-white/15 bg-[rgb(18,18,18)] shadow-2xl p-6">
+            <button
+              onClick={closeInvest}
+              disabled={investing}
+              className="absolute top-3 right-3 p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {investResult ? (
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold text-white">Investment Confirmed</h3>
+                <p className="text-sm text-white/60">
+                  Donation was recorded for <span className="text-white font-semibold">{selectedCampaign.title}</span>.
+                </p>
+                <div className="rounded-xl border border-white/[0.12] bg-white/[0.03] p-3">
+                  <p className="text-[10px] uppercase tracking-widest text-white/35 mb-1">Transaction</p>
+                  <p className="text-xs text-white/65 break-all font-mono">{investResult.signature}</p>
+                </div>
+                <a
+                  href={investResult.explorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-[oklch(0.65_0.25_25)] hover:text-white"
+                >
+                  View on Solana Explorer <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <div className="pt-2">
+                  <LiquidButton className="w-full" onClick={closeInvest}>Done</LiquidButton>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold text-white">Confirm Investment</h3>
+                <p className="text-sm text-white/60">
+                  Send SOL from your donor wallet to this campaign vault.
+                </p>
+                <div className="rounded-xl border border-white/[0.12] bg-white/[0.03] p-3">
+                  <p className="text-[10px] uppercase tracking-widest text-white/35 mb-1">Campaign</p>
+                  <p className="text-sm text-white font-semibold">{selectedCampaign.title}</p>
+                  <p className="text-[11px] text-white/45 mt-1 break-all">Vault: {selectedCampaign.vault_address ?? 'Not configured'}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-widest text-white/45 mb-2 block">
+                    Amount (SOL)
+                  </label>
+                  <input
+                    type="number"
+                    value={investAmount}
+                    onChange={(e) => setInvestAmount(e.target.value)}
+                    min="0.01"
+                    step="0.01"
+                    className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {['0.1', '0.5', '1'].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setInvestAmount(v)}
+                      className="py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white/65 text-xs hover:bg-white/[0.08] hover:text-white"
+                    >
+                      {v} SOL
+                    </button>
+                  ))}
+                </div>
+                <LiquidButton
+                  className="w-full"
+                  onClick={confirmInvest}
+                  disabled={investing || !selectedCampaign.vault_address}
+                >
+                  {investing ? 'Processing Transaction...' : 'Confirm & Send'}
+                </LiquidButton>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
