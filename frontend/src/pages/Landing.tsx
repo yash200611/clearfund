@@ -14,7 +14,7 @@ import { PLATFORM_STATS } from '@/data/seed'
 
 export default function Landing() {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, isAuthenticated } = useAuth()
   const [scrolled, setScrolled] = useState(false)
   const [featuredCampaigns, setFeaturedCampaigns] = useState<Campaign[]>([])
 
@@ -60,10 +60,13 @@ export default function Landing() {
           <span className="font-bold text-white text-lg">ClearFund</span>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => login()} className="text-white/60 hover:text-white transition-colors text-sm font-medium px-4 py-2">
+          <button
+            onClick={() => isAuthenticated ? navigate('/dashboard') : login()}
+            className="text-white/60 hover:text-white transition-colors text-sm font-medium px-4 py-2"
+          >
             Log in
           </button>
-          <MetalButton onClick={() => login({ screen_hint: 'signup' })}>Get Started</MetalButton>
+          <MetalButton onClick={() => isAuthenticated ? navigate('/dashboard') : login({ screen_hint: 'signup' })}>Get Started</MetalButton>
         </div>
       </nav>
 
@@ -91,7 +94,7 @@ export default function Landing() {
               EXPLORE CAMPAIGNS
               <ChevronRight className="w-5 h-5" />
             </LiquidButton>
-            <MetalButton variant="default" onClick={() => login({ screen_hint: 'signup' })}>
+            <MetalButton variant="default" onClick={() => isAuthenticated ? navigate('/dashboard') : login({ screen_hint: 'signup' })}>
               LAUNCH A PROJECT
             </MetalButton>
           </div>

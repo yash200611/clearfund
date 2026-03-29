@@ -16,7 +16,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   needsRoleSelection: boolean;
-  login: (options?: { screen_hint?: string }) => void;
+  login: (options?: { screen_hint?: string; returnTo?: string }) => void;
   logout: () => void;
   setRole: (role: 'donor' | 'ngo') => Promise<void>;
 }
@@ -113,15 +113,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, auth0Sub, auth0Name, auth0Email, auth0Avatar, tokenRole]);
 
-  const login = useCallback((options?: { screen_hint?: string }) => {
+  const login = useCallback((options?: { screen_hint?: string; returnTo?: string }) => {
     loginWithRedirect({
-      authorizationParams: { screen_hint: options?.screen_hint },
+      authorizationParams: {
+        screen_hint: options?.screen_hint,
+        // Force interactive login/signup screen instead of silent SSO bounce.
+        prompt: 'login',
+      },
+      appState: {
+        returnTo: options?.returnTo ?? '/dashboard',
+      },
     });
   }, [loginWithRedirect]);
 
   const logout = useCallback(() => {
     setAppUser(null);
-    auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    auth0Logout({
+      logoutParams: {
+        returnTo: window.location.origin,
+        federated: true,
+      },
+    });
   }, [auth0Logout]);
 
   const setRole = useCallback(async (role: 'donor' | 'ngo') => {

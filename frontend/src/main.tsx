@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
-import { Auth0Provider } from '@auth0/auth0-react'
+import { BrowserRouter, useNavigate } from 'react-router-dom'
+import { Auth0Provider, type AppState } from '@auth0/auth0-react'
 import { Toaster } from 'sonner'
 import { AuthProvider } from './contexts/AuthContext'
 import './index.css'
@@ -11,18 +11,33 @@ const domain = import.meta.env.VITE_AUTH0_DOMAIN
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID
 const audience = import.meta.env.VITE_AUTH0_AUDIENCE
 
+function Auth0ProviderWithRedirect({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate()
+
+  const onRedirectCallback = (appState?: AppState) => {
+    navigate(appState?.returnTo || '/dashboard', { replace: true })
+  }
+
+  return (
+    <Auth0Provider
+      domain={domain}
+      clientId={clientId}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        audience: audience,
+        scope: 'openid profile email',
+      }}
+      onRedirectCallback={onRedirectCallback}
+    >
+      {children}
+    </Auth0Provider>
+  )
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <Auth0Provider
-        domain={domain}
-        clientId={clientId}
-        authorizationParams={{
-          redirect_uri: window.location.origin,
-          audience: audience,
-          scope: 'openid profile email',
-        }}
-      >
+      <Auth0ProviderWithRedirect>
         <AuthProvider>
           <App />
           <Toaster
@@ -38,7 +53,7 @@ createRoot(document.getElementById('root')!).render(
             }}
           />
         </AuthProvider>
-      </Auth0Provider>
+      </Auth0ProviderWithRedirect>
     </BrowserRouter>
   </StrictMode>,
 )
