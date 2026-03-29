@@ -21,7 +21,7 @@ from oracle.decision_oracle import OracleResult, OracleVerdict
 from wallet.privy_client import PrivyClient
 
 SOLANA_NETWORK       = os.getenv("SOLANA_NETWORK", "devnet")
-SOLANA_RPC_URL       = f"https://api.{SOLANA_NETWORK}.solana.com"
+SOLANA_RPC_URL       = os.getenv("SOLANA_RPC_URL") or f"https://api.{SOLANA_NETWORK}.solana.com"
 PRIVY_AUTHORITY_ID   = os.getenv("PRIVY_AUTHORITY_WALLET_ID", "")
 LAMPORTS_PER_SOL     = 1_000_000_000
 EXPLORER_BASE        = "https://explorer.solana.com/tx"
