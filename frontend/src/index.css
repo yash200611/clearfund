@@ -49,3 +49,32 @@ body {
   background: rgba(255, 100, 50, 0.3);
   color: white;
 }
+
+/* Orbital timeline animations */
+@keyframes orbital-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes orbital-ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.animate-orbital-pulse {
+  animation: orbital-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-orbital-ping {
+  animation: orbital-ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.shadow-orbital {
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+}
