@@ -47,6 +47,9 @@ function lamportsFromSol(amountSol: number): number {
 }
 
 function explorerUrl(signature: string): string {
+  if (NETWORK === 'localnet') {
+    return `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${encodeURIComponent(RPC_URL)}`
+  }
   return `https://explorer.solana.com/tx/${signature}?cluster=${NETWORK}`
 }
 

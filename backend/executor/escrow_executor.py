@@ -1,10 +1,11 @@
 """
 ClearFund Escrow Executor
 Only called when OracleVerdict == APPROVED.
-Builds and submits Solana transactions via Privy.
+Builds and submits Solana transactions via Privy (or localnet keypairs).
 """
 
 import base64
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,6 +20,9 @@ from solders.hash import Hash
 
 from oracle.decision_oracle import OracleResult, OracleVerdict
 from wallet.privy_client import PrivyClient
+from wallet import localnet as localnet_wallet
+
+logger = logging.getLogger("clearfund.executor")
 
 SOLANA_NETWORK       = os.getenv("SOLANA_NETWORK", "devnet")
 SOLANA_RPC_URL       = os.getenv("SOLANA_RPC_URL") or f"https://api.{SOLANA_NETWORK}.solana.com"
@@ -32,6 +36,7 @@ class EscrowExecutor:
     def __init__(self):
         self.privy = PrivyClient()
         self.solana = SolanaClient(SOLANA_RPC_URL)
+        self._is_localnet = SOLANA_NETWORK.lower() == "localnet"
 
     def _build_transfer_tx(
         self,
@@ -102,8 +107,16 @@ class EscrowExecutor:
             raise RuntimeError("Campaign missing Privy vault signer wallet ID")
 
         # Build and send transaction
-        tx_b64    = self._build_transfer_tx(vault_address, ngo_wallet, amount_sol)
-        signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
+        if self._is_localnet:
+            vault_keypair_json = campaign.get("localnet_vault_keypair_json", "")
+            if not vault_keypair_json:
+                raise RuntimeError("Campaign missing localnet_vault_keypair_json for localnet release")
+            signature = localnet_wallet.sign_and_send(
+                vault_keypair_json, ngo_wallet, amount_sol, SOLANA_RPC_URL,
+            )
+        else:
+            tx_b64    = self._build_transfer_tx(vault_address, ngo_wallet, amount_sol)
+            signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
 
         released_at   = datetime.now(timezone.utc)
         explorer_url  = f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
@@ -154,8 +167,16 @@ class EscrowExecutor:
             if not donor_wallet:
                 continue
 
-            tx_b64    = self._build_transfer_tx(vault_address, donor_wallet, locked)
-            signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
+            if self._is_localnet:
+                vault_keypair_json = campaign.get("localnet_vault_keypair_json", "")
+                if not vault_keypair_json:
+                    raise RuntimeError("Campaign missing localnet_vault_keypair_json for localnet refund")
+                signature = localnet_wallet.sign_and_send(
+                    vault_keypair_json, donor_wallet, locked, SOLANA_RPC_URL,
+                )
+            else:
+                tx_b64    = self._build_transfer_tx(vault_address, donor_wallet, locked)
+                signature = await self.privy.sign_and_send_transaction(signer_wallet_id, tx_b64)
 
             results.append({
                 "donor_id":   donation.get("donor_id") or donation.get("_id"),

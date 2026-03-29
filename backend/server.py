@@ -38,6 +38,7 @@ from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
 from analytics.lava_client import LavaClient
 from wallet.privy_client import PrivyClient
+from wallet import localnet as localnet_wallet
 from analytics.cached_lava import get_cached_vault_transactions, get_cached_vault_stats
 from models import (
     Campaign,
@@ -68,11 +69,17 @@ SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", f"https://api.{SOLANA_NETWORK}.sola
 SOLANA_LOCAL_KEYPAIR_PATH = os.getenv("SOLANA_LOCAL_KEYPAIR_PATH", os.path.expanduser("~/.config/solana/id.json"))
 
 
-def _localnet_sign_and_send(from_address: str, to_address: str, amount_sol: float) -> str:
-    """Sign and send a SOL transfer using the local keypair (localnet only)."""
-    keypair_json = os.getenv("SOLANA_LOCAL_KEYPAIR_JSON", "")
+def _localnet_sign_and_send(from_address: str, to_address: str, amount_sol: float, keypair_json: str = "") -> str:
+    """Sign and send a SOL transfer on localnet.
+    If keypair_json is provided (from DB), use that.
+    Otherwise fall back to the system CLI keypair.
+    """
     if keypair_json:
-        key_bytes = bytes(json.loads(keypair_json))
+        return localnet_wallet.sign_and_send(keypair_json, to_address, amount_sol, SOLANA_RPC_URL)
+
+    env_json = os.getenv("SOLANA_LOCAL_KEYPAIR_JSON", "")
+    if env_json:
+        key_bytes = bytes(json.loads(env_json))
     else:
         with open(SOLANA_LOCAL_KEYPAIR_PATH) as f:
             key_bytes = bytes(json.load(f))
@@ -490,6 +497,8 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
 
 
 def _solana_explorer_url(signature: str) -> str:
+    if SOLANA_NETWORK.lower() == "localnet":
+        return f"{EXPLORER_BASE}/{signature}?cluster=custom&customUrl=http%3A%2F%2F127.0.0.1%3A8899"
     return f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
 
 
@@ -514,14 +523,26 @@ async def _fetch_transaction(signature: str) -> dict:
             },
         ],
     }
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(SOLANA_RPC_URL, json=payload)
-            response.raise_for_status()
-            body = response.json()
-    except Exception as e:
-        logger.exception("[DonationTransfer] Solana RPC failed sig=%s error=%s", signature, str(e))
-        raise HTTPException(status_code=503, detail="Unable to verify transaction on Solana RPC")
+    # On localnet, the transaction may not be indexed yet. Retry a few times.
+    max_attempts = 5 if SOLANA_NETWORK.lower() == "localnet" else 1
+    body = None
+    for attempt in range(max_attempts):
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(SOLANA_RPC_URL, json=payload)
+                response.raise_for_status()
+                body = response.json()
+        except Exception as e:
+            logger.exception("[DonationTransfer] Solana RPC failed sig=%s error=%s", signature, str(e))
+            if attempt == max_attempts - 1:
+                raise HTTPException(status_code=503, detail="Unable to verify transaction on Solana RPC")
+            await asyncio.sleep(0.5)
+            continue
+
+        if body.get("result") is not None:
+            break
+        if attempt < max_attempts - 1:
+            await asyncio.sleep(0.5)
 
     if "error" in body:
         logger.warning(
@@ -797,12 +818,32 @@ async def create_campaign(
     campaign_id = str(campaign_oid)
 
     # Vault must be provisioned before campaign is created.
+    localnet_vault_keypair_json = None
     try:
-        privy = PrivyClient()
-        vault_wallet = await asyncio.wait_for(
-            privy.create_campaign_vault_wallet(campaign_id),
-            timeout=12,
-        )
+        if SOLANA_NETWORK.lower() == "localnet":
+            vault_kp = localnet_wallet.generate_keypair()
+            vault_wallet = {
+                "wallet_id": f"local_vault_{vault_kp['address'][:8]}",
+                "address": vault_kp["address"],
+            }
+            localnet_vault_keypair_json = vault_kp["keypair_json"]
+            # Fund the vault account so it exists on-chain (rent-exempt minimum).
+            try:
+                await asyncio.to_thread(
+                    localnet_wallet.airdrop, vault_kp["address"], 0.01, SOLANA_RPC_URL,
+                )
+            except Exception:
+                pass  # Non-fatal; vault will be funded by donations.
+            logger.info(
+                "[CampaignCreate] localnet vault created address=%s",
+                vault_kp["address"],
+            )
+        else:
+            privy = PrivyClient()
+            vault_wallet = await asyncio.wait_for(
+                privy.create_campaign_vault_wallet(campaign_id),
+                timeout=12,
+            )
     except asyncio.TimeoutError:
         logger.warning(
             "[CampaignCreate] vault provisioning timed out sub=%s campaign_id=%s",
@@ -842,6 +883,7 @@ async def create_campaign(
         "slash_history": [],
         "vault_address": vault_wallet["address"],
         "privy_vault_wallet_id": vault_wallet["wallet_id"],
+        **({"localnet_vault_keypair_json": localnet_vault_keypair_json} if localnet_vault_keypair_json else {}),
         "status": "active",
         "trust_score": trust_score,
         "failure_count": 0,
@@ -1039,14 +1081,21 @@ async def sign_privy_transfer(
     if not vault_address:
         raise HTTPException(status_code=422, detail="Campaign has no vault_address")
 
-    privy = PrivyClient()
     # Leave room for network fee + minor rent fluctuations.
     fee_buffer_sol = float(os.getenv("DONOR_TRANSFER_FEE_BUFFER_SOL", "0.005"))
     required_sol = body.amount_sol + max(0.001, fee_buffer_sol)
     current_balance: Optional[float] = None
 
+    is_localnet = SOLANA_NETWORK.lower() == "localnet"
+
     try:
-        current_balance = await privy.get_wallet_balance(donor_wallet)
+        if is_localnet:
+            current_balance = await asyncio.to_thread(
+                localnet_wallet.get_balance, donor_wallet, SOLANA_RPC_URL,
+            )
+        else:
+            privy = PrivyClient()
+            current_balance = await privy.get_wallet_balance(donor_wallet)
     except Exception as e:
         logger.warning(
             "[PrivyTransfer] balance check failed donor_wallet=%s error=%s",
@@ -1056,11 +1105,16 @@ async def sign_privy_transfer(
 
     if current_balance is not None and current_balance < required_sol:
         attempted_airdrop = False
-        if SOLANA_NETWORK.lower() in ("devnet", "testnet"):
+        if is_localnet or SOLANA_NETWORK.lower() in ("devnet", "testnet"):
             topup = max(1.0, round(required_sol - current_balance + 0.25, 3))
-            topup = min(topup, 5.0)
+            topup = min(topup, 10.0)
             try:
-                airdrop_sig = await privy.request_airdrop(donor_wallet, sol=topup)
+                if is_localnet:
+                    airdrop_sig = await asyncio.to_thread(
+                        localnet_wallet.airdrop, donor_wallet, topup, SOLANA_RPC_URL,
+                    )
+                else:
+                    airdrop_sig = await privy.request_airdrop(donor_wallet, sol=topup)
                 attempted_airdrop = True
                 logger.info(
                     "[PrivyTransfer] auto-airdrop requested donor_wallet=%s amount_sol=%.3f sig=%s",
@@ -1068,8 +1122,13 @@ async def sign_privy_transfer(
                     topup,
                     airdrop_sig,
                 )
-                await asyncio.sleep(1.0)
-                current_balance = await privy.get_wallet_balance(donor_wallet)
+                await asyncio.sleep(0.5)
+                if is_localnet:
+                    current_balance = await asyncio.to_thread(
+                        localnet_wallet.get_balance, donor_wallet, SOLANA_RPC_URL,
+                    )
+                else:
+                    current_balance = await privy.get_wallet_balance(donor_wallet)
             except Exception as e:
                 logger.warning(
                     "[PrivyTransfer] auto-airdrop failed donor_wallet=%s error=%s",
@@ -1126,8 +1185,9 @@ async def sign_privy_transfer(
 
     try:
         if SOLANA_NETWORK.lower() == "localnet":
+            donor_keypair_json = donor_doc.get("localnet_keypair_json", "")
             signature = await asyncio.to_thread(
-                _localnet_sign_and_send, donor_wallet, vault_address, body.amount_sol
+                _localnet_sign_and_send, donor_wallet, vault_address, body.amount_sol, donor_keypair_json
             )
         else:
             signature = await privy.sign_and_send_transaction(privy_wallet_id, tx_b64)
@@ -1534,25 +1594,47 @@ class UpdateRoleRequest(_BaseModel):
     role: str
 
 async def _provision_wallet(auth0_sub: str, role: str) -> None:
-    """Background task: create Privy wallet + airdrop. Non-blocking."""
+    """Background task: create wallet + airdrop. Non-blocking.
+    On localnet: generates a local keypair and airdrops from the validator.
+    Otherwise: delegates to Privy.
+    """
     try:
-        logger.info("[Wallet] provisioning started sub=%s role=%s", auth0_sub, role)
-        privy = PrivyClient()
-        wallet = await privy.create_embedded_wallet(auth0_sub)
-        update: dict = {
-            "privy_wallet_id": wallet["wallet_id"],
-            "wallet_address": wallet["address"],
-        }
-        if role == "donor":
-            try:
-                await privy.request_airdrop(wallet["address"], sol=5.0)
-                update["wallet_balance_sol"] = 5.0
-                logger.info("[Wallet] airdrop success address=%s amount_sol=5.0", wallet["address"])
-            except Exception as e:
-                logger.warning("[Wallet] airdrop failed (non-fatal) address=%s error=%s", wallet["address"], str(e))
+        logger.info("[Wallet] provisioning started sub=%s role=%s network=%s", auth0_sub, role, SOLANA_NETWORK)
+
+        if SOLANA_NETWORK.lower() == "localnet":
+            wallet = localnet_wallet.generate_keypair()
+            update: dict = {
+                "privy_wallet_id": f"local_{wallet['address'][:8]}",
+                "wallet_address": wallet["address"],
+                "localnet_keypair_json": wallet["keypair_json"],
+            }
+            if role == "donor":
+                try:
+                    await asyncio.to_thread(
+                        localnet_wallet.airdrop, wallet["address"], 10.0, SOLANA_RPC_URL,
+                    )
+                    update["wallet_balance_sol"] = 10.0
+                    logger.info("[Wallet] localnet airdrop success address=%s amount_sol=10.0", wallet["address"])
+                except Exception as e:
+                    logger.warning("[Wallet] localnet airdrop failed (non-fatal) address=%s error=%s", wallet["address"], str(e))
+        else:
+            privy = PrivyClient()
+            wallet = await privy.create_embedded_wallet(auth0_sub)
+            update = {
+                "privy_wallet_id": wallet["wallet_id"],
+                "wallet_address": wallet["address"],
+            }
+            if role == "donor":
+                try:
+                    await privy.request_airdrop(wallet["address"], sol=5.0)
+                    update["wallet_balance_sol"] = 5.0
+                    logger.info("[Wallet] airdrop success address=%s amount_sol=5.0", wallet["address"])
+                except Exception as e:
+                    logger.warning("[Wallet] airdrop failed (non-fatal) address=%s error=%s", wallet["address"], str(e))
+
         db_bg = _get_bg_db()
         await db_bg.users.update_one({"auth0_sub": auth0_sub}, {"$set": update})
-        logger.info("[Wallet] provisioning finished sub=%s role=%s address=%s", auth0_sub, role, wallet["address"])
+        logger.info("[Wallet] provisioning finished sub=%s role=%s address=%s", auth0_sub, role, update.get("wallet_address"))
     except Exception as e:
         logger.exception("[Wallet] provisioning failed (non-fatal) sub=%s role=%s error=%s", auth0_sub, role, str(e))
 
@@ -1607,8 +1689,13 @@ async def get_my_wallet(user: TokenData = Depends(get_current_user)):
         return {"wallet_address": None, "balance_sol": 0.0}
     address = doc["wallet_address"]
     try:
-        privy = PrivyClient()
-        balance = await privy.get_wallet_balance(address)
+        if SOLANA_NETWORK.lower() == "localnet":
+            balance = await asyncio.to_thread(
+                localnet_wallet.get_balance, address, SOLANA_RPC_URL,
+            )
+        else:
+            privy = PrivyClient()
+            balance = await privy.get_wallet_balance(address)
     except Exception:
         balance = 0.0
     return {"wallet_address": address, "balance_sol": balance}
