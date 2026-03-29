@@ -1,7 +1,7 @@
-// In production (Vercel), leave empty so requests go to the same origin and
-// are proxied to the backend via vercel.json rewrites.
-// In local dev, use VITE_API_URL (e.g. http://localhost:8000).
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// In production, always use same-origin /api so Vercel rewrites can proxy to Render.
+// In local dev, VITE_API_URL can point to the backend directly (e.g. http://localhost:8000).
+const configuredApiBase = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const API_BASE = import.meta.env.DEV ? (configuredApiBase || '') : '';
 
 // Token getter — set by AuthContext after Auth0 authenticates
 let _getToken: (() => Promise<string>) | null = null;
@@ -31,7 +31,7 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
   } catch {
     const target = API_BASE || 'same-origin /api';
-    throw new Error(`Unable to reach backend (${target}). Start backend and verify VITE_API_URL.`);
+    throw new Error(`Unable to reach backend (${target}). Check Vercel rewrite/CORS config.`);
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

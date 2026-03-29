@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { setTokenGetter, updateRole } from '@/api/client';
+import { getCurrentUser, setTokenGetter, updateRole } from '@/api/client';
 
 export interface AppUser {
   id: string;
@@ -74,32 +74,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function fetchProfile() {
       setProfileLoading(true);
       try {
-        const token = await getTokenSilentlyRef.current();
-        const res = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const profile = await res.json();
-          if (!cancelled) {
-            setAppUser(prev => ({
-              id: profile._id ?? profile.id ?? fallbackUser.id,
-              name: fallbackUser.name,
-              email: fallbackUser.email,
-              role: profile.role ?? prev?.role ?? fallbackUser.role,
-              avatar: fallbackUser.avatar,
-              wallet_address: profile.wallet_address ?? prev?.wallet_address,
-            }));
-          }
-        } else {
-          if (!cancelled) {
-            setAppUser(prev => prev ? {
-              ...prev,
-              name: prev.name || fallbackUser.name,
-              email: prev.email || fallbackUser.email,
-              avatar: prev.avatar ?? fallbackUser.avatar,
-              role: prev.role ?? fallbackUser.role,
-            } : fallbackUser);
-          }
+        const profile = await getCurrentUser() as {
+          _id?: string;
+          id?: string;
+          role?: AppUser['role'];
+          wallet_address?: string;
+        };
+        if (!cancelled) {
+          setAppUser(prev => ({
+            id: profile._id ?? profile.id ?? fallbackUser.id,
+            name: fallbackUser.name,
+            email: fallbackUser.email,
+            role: profile.role ?? prev?.role ?? fallbackUser.role,
+            avatar: fallbackUser.avatar,
+            wallet_address: profile.wallet_address ?? prev?.wallet_address,
+          }));
         }
       } catch {
         if (!cancelled) {
