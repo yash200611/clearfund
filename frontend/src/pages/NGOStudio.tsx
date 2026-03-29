@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
-import { Plus, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Loader2, Plus, Rocket, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
-import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
-import { getCampaigns, getCampaignById, createCampaign } from '@/api/client'
+import { getCampaignById, getCampaigns, createCampaign } from '@/api/client'
 import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
-const TABS = ['My Campaigns', 'New Campaign']
+const TABS = ['My Campaigns', 'Launch Campaign']
 const POLL_INTERVAL_MS = 2500
-const MAX_POLLS = 40 // ~100 seconds max
+const MAX_POLLS = 40
 
 interface ReviewState {
   campaignId: string
@@ -35,15 +34,20 @@ export default function NGOStudio() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollCountRef = useRef(0)
 
-  const loadMyCampaigns = () => {
+  const loadMyCampaigns = useCallback(() => {
     getCampaigns()
       .then((data) => setCampaigns(data.filter((c) => c.ngo_id === user?.id)))
       .catch(() => {})
-  }
+  }, [user?.id])
 
-  useEffect(() => { loadMyCampaigns() }, [user?.id])
+  useEffect(() => {
+    loadMyCampaigns()
+  }, [loadMyCampaigns])
 
-  // Poll campaign status until review is done
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+  }, [])
+
   const startPolling = (campaignId: string) => {
     pollCountRef.current = 0
     if (pollRef.current) clearInterval(pollRef.current)
@@ -51,23 +55,27 @@ export default function NGOStudio() {
     pollRef.current = setInterval(async () => {
       pollCountRef.current += 1
       try {
-        const c = await getCampaignById(campaignId)
-        const recommendation = c.campaign_review?.recommendation
-        const reviewedAt = c.campaign_review?.reviewed_at
+        const campaign = await getCampaignById(campaignId)
+        const recommendation = campaign.campaign_review?.recommendation
+        const reviewedAt = campaign.campaign_review?.reviewed_at
         const hasGeminiDecision = Boolean(reviewedAt || (recommendation && recommendation !== 'pending'))
 
-        if (c.status !== 'under_review' || hasGeminiDecision) {
+        if (campaign.status !== 'under_review' || hasGeminiDecision) {
           clearInterval(pollRef.current!)
           pollRef.current = null
-          setReview(prev => prev ? {
-            ...prev,
-            phase: 'completed',
-            recommendation,
-            status: c.status,
-            trust_score: c.trust_score,
-            reasoning: c.campaign_review?.reasoning,
-            risk_flags: c.campaign_review?.risk_flags,
-          } : prev)
+          setReview((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  phase: 'completed',
+                  recommendation,
+                  status: campaign.status,
+                  trust_score: campaign.trust_score,
+                  reasoning: campaign.campaign_review?.reasoning,
+                  risk_flags: campaign.campaign_review?.risk_flags,
+                }
+              : prev,
+          )
           loadMyCampaigns()
         }
       } catch {}
@@ -75,21 +83,22 @@ export default function NGOStudio() {
       if (pollCountRef.current >= MAX_POLLS) {
         clearInterval(pollRef.current!)
         pollRef.current = null
-        // Timed out — surface this explicitly so it doesn't look like a completed review.
-        setReview(prev => prev ? {
-          ...prev,
-          phase: 'completed',
-          status: 'under_review',
-          recommendation: 'pending',
-          reasoning: 'Gemini review is still processing or unavailable. Check backend logs for the campaign review result.',
-          risk_flags: ['campaign_review_pending'],
-        } : prev)
+        setReview((prev) =>
+          prev
+            ? {
+                ...prev,
+                phase: 'completed',
+                status: 'under_review',
+                recommendation: 'pending',
+                reasoning: 'Gemini review is still processing. Please check back shortly.',
+                risk_flags: ['campaign_review_pending'],
+              }
+            : prev,
+        )
         loadMyCampaigns()
       }
     }, POLL_INTERVAL_MS)
   }
-
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -117,8 +126,7 @@ export default function NGOStudio() {
         startPolling(campaign._id)
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create campaign. Please try again.'
-      toast.error(msg)
+      toast.error(err instanceof Error ? err.message : 'Failed to create campaign. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -129,15 +137,11 @@ export default function NGOStudio() {
     setTab(0)
   }
 
-  const inputClass = "w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
-
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-
-      {/* Live Review Overlay */}
+    <div className="cf-page max-w-6xl space-y-6 pb-10">
       {review && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-          <GlassCard className="w-full max-w-lg p-8 space-y-5">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-6">
+          <GlassCard className="w-full max-w-xl p-7 space-y-5">
             <div className="flex items-center gap-3">
               {review.phase === 'started' ? (
                 <Loader2 className="w-6 h-6 text-amber-400 animate-spin flex-shrink-0" />
@@ -149,14 +153,14 @@ export default function NGOStudio() {
                 <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0" />
               )}
               <div>
-                <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-white/40">
                   {review.phase === 'started'
-                    ? 'Gemini is reviewing your campaign...'
+                    ? 'Gemini reviewing campaign'
                     : review.recommendation === 'pending'
-                      ? 'Review Still In Progress'
-                      : 'Review Complete'}
+                      ? 'Review in progress'
+                      : 'Review complete'}
                 </p>
-                <p className="text-white font-semibold text-sm mt-0.5 line-clamp-1">{review.title}</p>
+                <p className="text-white font-semibold text-sm mt-0.5">{review.title}</p>
               </div>
             </div>
 
@@ -165,50 +169,43 @@ export default function NGOStudio() {
                 <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
                   <div className="h-full bg-amber-400/70 rounded-full animate-pulse w-2/3" />
                 </div>
-                <p className="text-xs text-white/40">Analyzing description, category, and risk signals…</p>
+                <p className="text-xs text-white/45">Analyzing campaign narrative, risk vectors, and trust profile...</p>
               </div>
             )}
 
             {review.phase === 'completed' && (
               <div className="space-y-4">
-                {/* Status + Score */}
-                <div className="flex items-center gap-3">
-                  <span className={cn(
-                    'px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest',
-                    review.status === 'active' ? 'bg-emerald-400/15 text-emerald-400' :
-                    review.status === 'rejected' ? 'bg-red-400/15 text-red-400' :
-                    'bg-amber-400/15 text-amber-400'
-                  )}>
-                    {review.status === 'active' ? 'Approved — Live' :
-                     review.status === 'rejected' ? 'Rejected' : 'Under Review'}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      'px-3 py-1 rounded-full text-xs font-bold uppercase tracking-[0.14em]',
+                      review.status === 'active'
+                        ? 'bg-emerald-400/15 text-emerald-300'
+                        : review.status === 'rejected'
+                          ? 'bg-red-400/15 text-red-300'
+                          : 'bg-amber-400/15 text-amber-300',
+                    )}
+                  >
+                    {review.status === 'active' ? 'Approved — Live' : review.status === 'rejected' ? 'Rejected' : 'Under Review'}
                   </span>
-                  {review.recommendation && (
-                    <span className="text-xs text-white/50 uppercase tracking-widest">
-                      Model decision: <span className="text-white/80">{review.recommendation}</span>
-                    </span>
-                  )}
                   {review.trust_score !== undefined && (
-                    <span className="text-xs text-white/50">
-                      Trust score: <span className="text-white font-semibold">{review.trust_score}%</span>
-                    </span>
+                    <span className="text-xs text-white/55">Trust score: {review.trust_score}%</span>
                   )}
                 </div>
 
-                {/* Reasoning */}
                 {review.reasoning && (
-                  <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-4">
-                    <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-2">Gemini's Reasoning</p>
-                    <p className="text-sm text-white/80 leading-relaxed">{review.reasoning}</p>
+                  <div className="rounded-xl border border-white/[0.12] bg-white/[0.04] p-4">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-white/35 mb-2">Model Reasoning</p>
+                    <p className="text-sm text-white/78 leading-relaxed">{review.reasoning}</p>
                   </div>
                 )}
 
-                {/* Risk flags */}
                 {review.risk_flags && review.risk_flags.length > 0 && (
                   <div className="space-y-1">
-                    <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">Risk Flags</p>
-                    {review.risk_flags.map((flag, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs text-amber-400/80">
-                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">Risk Flags</p>
+                    {review.risk_flags.map((flag, index) => (
+                      <div key={index} className="text-xs text-amber-300/85 flex items-center gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5" />
                         {flag.replace(/_/g, ' ')}
                       </div>
                     ))}
@@ -224,69 +221,113 @@ export default function NGOStudio() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white mb-1">NGO Studio</h2>
-          <p className="text-sm text-white/50">Manage your campaigns and launch new ones.</p>
+      <GlassCard className="p-6 md:p-8 cf-animate-in" glow>
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-white/38 mb-2">Builder Surface</p>
+            <h2 className="cf-display text-4xl md:text-5xl text-white">NGO Studio</h2>
+            <p className="text-sm text-white/58 mt-3 max-w-2xl">
+              Design and launch campaigns with clear impact narratives and real-time risk screening.
+            </p>
+          </div>
+          <button
+            onClick={() => setTab(1)}
+            className="h-11 px-4 rounded-xl border border-white/[0.18] bg-white/[0.05] text-sm text-white/75 hover:text-white hover:bg-white/[0.09] transition-all inline-flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New Campaign
+          </button>
         </div>
-        <button onClick={() => setTab(1)} className="flex items-center gap-1.5 text-sm text-[oklch(0.65_0.25_25)] hover:text-white transition-colors">
-          <Plus className="w-4 h-4" />
-          New Campaign
-        </button>
-      </div>
+      </GlassCard>
 
-      <div className="flex gap-1 bg-white/[0.04] border border-white/[0.06] rounded-xl p-1 w-fit">
-        {TABS.map((t, i) => (
-          <button key={t} onClick={() => setTab(i)}
-            className={cn('px-4 py-2 rounded-lg text-sm font-medium transition-all', i === tab ? 'bg-white/[0.10] text-white' : 'text-white/50 hover:text-white')}>
-            {t}
+      <div className="inline-flex rounded-2xl border border-white/[0.12] bg-white/[0.03] p-1.5">
+        {TABS.map((label, i) => (
+          <button
+            key={label}
+            onClick={() => setTab(i)}
+            className={cn(
+              'px-4 py-2.5 rounded-xl text-sm transition-all',
+              i === tab
+                ? 'bg-[linear-gradient(130deg,rgba(255,255,255,0.18),rgba(255,255,255,0.05))] text-white'
+                : 'text-white/58 hover:text-white',
+            )}
+          >
+            {label}
           </button>
         ))}
       </div>
 
       {tab === 0 ? (
-        <div>
-          {campaigns.length === 0 ? (
-            <GlassCard className="p-12 text-center">
-              <p className="text-white/40 text-lg font-semibold mb-2">No campaigns yet</p>
-              <p className="text-white/30 text-sm mb-6">Launch your first campaign to start receiving escrow-protected donations.</p>
-              <LiquidButton onClick={() => setTab(1)}>LAUNCH CAMPAIGN</LiquidButton>
-            </GlassCard>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {campaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
-            </div>
-          )}
-        </div>
+        campaigns.length === 0 ? (
+          <GlassCard className="p-12 text-center cf-animate-in cf-stagger-2">
+            <Rocket className="w-10 h-10 text-white/30 mx-auto mb-4" />
+            <p className="cf-section-title text-3xl text-white/86">No campaigns yet</p>
+            <p className="text-sm text-white/48 mt-2">Launch your first campaign to start receiving milestone-based funding.</p>
+            <button
+              onClick={() => setTab(1)}
+              className="mt-5 h-11 px-5 rounded-xl border border-white/[0.2] bg-white/[0.06] text-sm text-white hover:bg-white/[0.1]"
+            >
+              Start new campaign
+            </button>
+          </GlassCard>
+        ) : (
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {campaigns.map((campaign, i) => (
+              <div key={campaign._id} className="cf-animate-in" style={{ animationDelay: `${90 + i * 55}ms` }}>
+                <CampaignCard campaign={campaign} />
+              </div>
+            ))}
+          </div>
+        )
       ) : (
-        <GlassCard className="p-8 max-w-2xl">
-          <h3 className="text-lg font-semibold text-white mb-6">Launch a New Campaign</h3>
+        <GlassCard className="p-6 md:p-8 max-w-3xl cf-animate-in cf-stagger-2" hover={false}>
+          <h3 className="cf-section-title text-3xl text-white mb-6">Launch Campaign</h3>
           <form onSubmit={handleCreate} className="space-y-5">
             <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Campaign Title</label>
-              <input value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} required
-                placeholder="e.g. Mobile Clinic for Rural Communities" className={inputClass} />
+              <label className="text-xs uppercase tracking-[0.14em] text-white/45 mb-2 block">Campaign Title</label>
+              <input
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                required
+                placeholder="e.g. Mobile clinic for remote regions"
+                className="cf-soft-input"
+              />
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Description</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} required
-                placeholder="Describe your campaign, goals, and impact..." rows={4}
-                className={cn(inputClass, 'resize-none')} />
+              <label className="text-xs uppercase tracking-[0.14em] text-white/45 mb-2 block">Narrative</label>
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                required
+                rows={4}
+                placeholder="Describe mission, milestones, and expected outcomes..."
+                className="cf-soft-input resize-none"
+              />
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Category</label>
-              <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
-                className={inputClass}>
-                {['Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate', 'Food Security'].map(c => (
-                  <option key={c} value={c} className="bg-neutral-900">{c}</option>
+              <label className="text-xs uppercase tracking-[0.14em] text-white/45 mb-2 block">Category</label>
+              <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className="cf-soft-input">
+                {['Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate', 'Food Security'].map((category) => (
+                  <option key={category} value={category} className="bg-neutral-900">
+                    {category}
+                  </option>
                 ))}
               </select>
             </div>
-            <div className="flex gap-3 pt-2">
-              <LiquidButton type="submit" disabled={saving}>
-                {saving ? 'Launching...' : 'LAUNCH CAMPAIGN'}
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              <LiquidButton type="submit" size="xl" disabled={saving}>
+                {saving ? 'Launching...' : 'Launch Campaign'}
               </LiquidButton>
-              <MetalButton type="button" onClick={() => setTab(0)}>Cancel</MetalButton>
+              <button
+                type="button"
+                onClick={() => setTab(0)}
+                className="h-12 px-5 rounded-xl border border-white/[0.16] bg-white/[0.04] text-sm text-white/72 hover:text-white hover:bg-white/[0.09] transition-all"
+              >
+                Cancel
+              </button>
             </div>
           </form>
         </GlassCard>
