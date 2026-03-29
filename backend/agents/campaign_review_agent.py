@@ -38,15 +38,14 @@ def _review_sync(campaign: dict) -> dict[str, Any]:
         return _default_under_review("Gemini API key is not configured")
 
     logger.info(
-        "[CampaignReviewAgent] running model=%s title=%s ngo=%s",
+        "[CampaignReviewAgent] running model=%s title=%s",
         MODEL_NAME,
         campaign.get("title", ""),
-        campaign.get("ngo_name", campaign.get("ngo_id", "")),
     )
     model = genai.GenerativeModel(MODEL_NAME)
 
     prompt = f"""You are ClearFund's campaign intake reviewer.
-Evaluate this campaign for launch readiness and abuse risk.
+Evaluate this campaign for launch readiness, credibility, and abuse risk.
 
 Return ONLY valid JSON with this exact schema:
 {{
@@ -61,15 +60,41 @@ Campaign:
 - title: {campaign.get("title", "")}
 - description: {campaign.get("description", "")}
 - category: {campaign.get("category", "")}
-- ngo_name: {campaign.get("ngo_name", campaign.get("ngo_id", ""))}
 - vault_address: {campaign.get("vault_address", "")}
 
-Rules:
-- approve only if description is coherent, specific, and not suspicious.
-- reject for obvious fraud/spam/abuse.
-- needs_info if details are vague but not clearly malicious.
-- confidence_score reflects certainty.
-- trust_score should be conservative for short/vague campaigns.
+Evaluation Framework:
+
+Positive Trust Signals (increase score significantly):
+- Clear, structured purpose with defined outcomes (e.g., diagnosis, treatment phases)
+- Mentions of transparency, verification, or accountability mechanisms
+- Real-world grounding (healthcare context, NGOs, patient support)
+- Professional tone (not emotional manipulation or vague appeals)
+- Presence of a vault_address (strong trust signal)
+- Specificity in how funds will be used
+
+Negative Signals (decrease score):
+- Vague or generic descriptions ("help people", "support cause")
+- Emotional manipulation without details
+- Missing key fields (especially vault_address)
+- Unrealistic claims or unclear fund usage
+
+Scoring Rules:
+- trust_score (0–100):
+  - 90–100 → highly credible, structured, verifiable, strong transparency signals
+  - 75–89 → good but missing some structure or verification clarity
+  - 50–74 → vague or partially defined
+  - <50 → suspicious, weak, or unclear
+
+- confidence_score reflects certainty in your evaluation.
+
+Decision Rules:
+- approve if strong positive signals outweigh risks
+- reject if clear fraud/spam/abuse indicators exist
+- needs_info if moderately vague but not malicious
+
+Important:
+- Bias toward HIGH trust_score when strong structure + transparency signals are present.
+- Do NOT be overly conservative if the campaign is well-defined and credible.
 """
 
     response = model.generate_content(prompt)

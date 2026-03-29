@@ -596,7 +596,6 @@ async def create_campaign(
         "title": body.title,
         "description": body.description,
         "category": body.category,
-        "ngo_name": ngo_name,
         # Vault is provisioned only after passing review.
         "vault_address": "pending",
     }
