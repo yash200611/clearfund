@@ -27,7 +27,7 @@ export default function Analytics() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-64">
+      <div className="cf-page flex items-center justify-center min-h-64">
         <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
       </div>
     )
@@ -35,7 +35,7 @@ export default function Analytics() {
 
   if (!stats) {
     return (
-      <div className="p-6">
+      <div className="cf-page">
         <p className="text-white/40 text-sm">Failed to load analytics.</p>
       </div>
     )
@@ -60,23 +60,24 @@ export default function Analytics() {
   ]
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="cf-page max-w-7xl space-y-6">
+      <div className="cf-animate-in flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-white mb-1">Analytics</h2>
-          <p className="text-sm text-white/50">Live platform metrics from MongoDB and Solana.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-2">Telemetry</p>
+          <h2 className="cf-section-title text-3xl sm:text-4xl font-bold text-white mb-1">Analytics</h2>
+          <p className="text-sm text-white/55">Live platform metrics from MongoDB and Solana.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.04] px-3 py-1.5">
           <div className={`w-2 h-2 rounded-full ${stats.lava_status === 'ok' ? 'bg-green-400' : 'bg-yellow-400'}`} />
-          <span className="text-xs text-white/40">Lava {stats.lava_status ?? 'unknown'}</span>
+          <span className="text-xs text-white/50">Lava {stats.lava_status ?? 'unknown'}</span>
         </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map(({ label, value }) => (
-          <GlassCard key={label} className="p-5">
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/40 mb-2">{label}</p>
-            <p className="text-2xl font-black text-white tabular-nums">{value}</p>
+        {cards.map(({ label, value }, i) => (
+          <GlassCard key={label} className="p-5 cf-animate-in" style={{ animationDelay: `${130 + i * 60}ms` }}>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/45 mb-2">{label}</p>
+            <p className="cf-display text-2xl font-black text-white tabular-nums">{value}</p>
           </GlassCard>
         ))}
       </div>

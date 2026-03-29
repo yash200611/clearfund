@@ -21,22 +21,23 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
 
   return (
     <GlassCard
-      className="overflow-hidden cursor-pointer group"
+      className="overflow-hidden cursor-pointer group transition-transform duration-300 hover:-translate-y-1"
       onClick={() => navigate(`/campaigns/${campaign._id}`)}
     >
-      <div className="relative h-44 overflow-hidden">
+      <div className="relative h-48 overflow-hidden">
         {campaign.image ? (
           <img
             src={campaign.image}
             alt={campaign.title}
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
           />
         ) : (
-          <div className="w-full h-full bg-white/[0.04] flex items-center justify-center">
-            <span className="text-4xl font-black text-white/10">{campaign.category?.[0]}</span>
+          <div className="w-full h-full bg-[linear-gradient(135deg,rgba(255,87,34,0.18),rgba(255,255,255,0.04),rgba(0,229,255,0.14))] flex items-center justify-center">
+            <span className="cf-display text-5xl text-white/40">{campaign.category?.[0]}</span>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+        <div className="cf-shimmer absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
         <div className="absolute top-3 left-3 flex gap-2 flex-wrap">
           <StatusBadge status={campaign.status} />
           <TrustBadge score={campaign.trust_score} size="sm" />
@@ -52,20 +53,20 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
       </div>
 
       <div className="p-5">
-        <p className="text-xs text-white/40 font-medium mb-1">{campaign.ngo_name}</p>
-        <h3 className="text-base font-semibold text-white mb-2 line-clamp-2 leading-snug">{campaign.title}</h3>
-        <p className="text-sm text-white/50 mb-4 line-clamp-2">{campaign.description}</p>
+        <p className="text-[11px] text-white/42 font-medium uppercase tracking-[0.14em] mb-1">{campaign.ngo_name}</p>
+        <h3 className="text-lg font-semibold text-white mb-2 line-clamp-2 leading-snug">{campaign.title}</h3>
+        <p className="text-sm text-white/55 mb-4 line-clamp-2">{campaign.description}</p>
 
-        <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+        <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
           <div
-            className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700"
+            className="h-full bg-[linear-gradient(90deg,oklch(0.65_0.25_25),oklch(0.74_0.19_71))] rounded-full transition-all duration-700"
             style={{ width: `${Math.min(100, pct)}%` }}
           />
         </div>
 
         <div className="flex items-center justify-between mt-3">
           <div>
-            <p className="text-lg font-bold text-white">{raised.toFixed(2)} SOL</p>
+            <p className="text-xl font-bold text-white tabular-nums">{raised.toFixed(2)} SOL</p>
             {goal > 0 && (
               <p className="text-xs text-white/40">of {goal} SOL goal · {pct}%</p>
             )}
@@ -91,7 +92,7 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
               onAction(campaign)
             }}
             disabled={actionDisabled}
-            className="mt-4 w-full py-2.5 rounded-xl bg-[oklch(0.65_0.25_25)]/90 text-white text-sm font-semibold transition-all hover:bg-[oklch(0.65_0.25_25)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mt-4 w-full py-3 rounded-xl bg-[linear-gradient(120deg,oklch(0.65_0.25_25),oklch(0.74_0.19_71))] text-white text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {actionLabel}
           </button>

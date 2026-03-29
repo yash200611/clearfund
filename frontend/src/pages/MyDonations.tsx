@@ -16,10 +16,11 @@ export default function MyDonations() {
   const locked = donations.reduce((s, d) => s + d.locked_sol, 0)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-1">My Donations</h2>
-        <p className="text-sm text-white/50">Track your impact and escrow status.</p>
+    <div className="cf-page max-w-6xl space-y-6">
+      <div className="cf-animate-in">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-2">Donor Ledger</p>
+        <h2 className="cf-section-title text-3xl sm:text-4xl font-bold text-white mb-1">My Donations</h2>
+        <p className="text-sm text-white/55">Track your impact and escrow status.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -27,20 +28,20 @@ export default function MyDonations() {
           { icon: DollarSign, label: 'Total Given', value: `${total.toFixed(2)} SOL` },
           { icon: TrendingUp, label: 'Impact Delivered', value: `${released.toFixed(2)} SOL` },
           { icon: Shield, label: 'In Escrow', value: `${locked.toFixed(2)} SOL` },
-        ].map(({ icon: Icon, label, value }) => (
-          <GlassCard key={label} className="p-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center flex-shrink-0">
+        ].map(({ icon: Icon, label, value }, i) => (
+          <GlassCard key={label} className="p-5 flex items-center gap-4 cf-animate-in" style={{ animationDelay: `${110 + i * 70}ms` }}>
+            <div className="w-11 h-11 rounded-2xl bg-white/[0.07] flex items-center justify-center flex-shrink-0">
               <Icon className="w-5 h-5 text-white/50" />
             </div>
             <div>
-              <p className="text-xl font-black text-white tabular-nums">{value}</p>
-              <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">{label}</p>
+              <p className="cf-display text-2xl font-black text-white tabular-nums">{value}</p>
+              <p className="text-xs text-white/45 uppercase tracking-[0.14em] font-semibold">{label}</p>
             </div>
           </GlassCard>
         ))}
       </div>
 
-      <GlassCard hover={false}>
+      <GlassCard hover={false} className="cf-animate-in cf-stagger-2">
         {donations.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-white/40 font-semibold">No donations yet</p>
@@ -52,14 +53,14 @@ export default function MyDonations() {
               <thead>
                 <tr className="border-b border-white/[0.06]">
                   {['Campaign', 'NGO', 'Amount', 'Released', 'In Escrow', 'Date', 'Tx'].map(h => (
-                    <th key={h} className="text-left text-[10px] font-semibold uppercase tracking-widest text-white/30 px-5 py-4">{h}</th>
+                    <th key={h} className="text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-white/30 px-5 py-4">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {donations.map(d => (
                   <tr key={d._id}
-                    className="border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors cursor-pointer"
+                    className="border-b border-white/[0.04] hover:bg-white/[0.04] transition-colors cursor-pointer"
                     onClick={() => navigate(`/campaigns/${d.campaign_id}`)}>
                     <td className="px-5 py-4 text-sm font-medium text-white max-w-[180px]">
                       <span className="line-clamp-1">{d.campaign_title ?? d.campaign_id}</span>

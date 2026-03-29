@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
 
 @import "tailwindcss";
 
@@ -8,6 +8,10 @@
   --color-destructive: #EF4444;
   --color-success: #22C55E;
   --color-warning: #F59E0B;
+}
+
+html {
+  color-scheme: dark;
 }
 
 * {
@@ -26,6 +30,131 @@ body {
 #root {
   min-height: 100vh;
   background-color: #000000;
+}
+
+.cf-app-shell {
+  --cf-surface: rgba(255, 255, 255, 0.04);
+  --cf-surface-soft: rgba(255, 255, 255, 0.025);
+  --cf-border: rgba(255, 255, 255, 0.1);
+  font-family: 'Manrope', 'Inter', sans-serif;
+  background: radial-gradient(circle at 50% -8%, rgba(255, 87, 34, 0.22) 0%, transparent 45%), #050507;
+}
+
+.cf-display {
+  font-family: 'Sora', 'Manrope', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.cf-grid-overlay {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse at center, black 26%, transparent 80%);
+}
+
+.cf-section-title {
+  font-family: 'Sora', 'Manrope', sans-serif;
+  letter-spacing: -0.015em;
+}
+
+.cf-soft-input {
+  width: 100%;
+  background: var(--cf-surface-soft);
+  border: 1px solid var(--cf-border);
+  border-radius: 0.85rem;
+  padding: 0.75rem 0.95rem;
+  color: white;
+  transition: all 220ms ease;
+}
+
+.cf-soft-input::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.cf-soft-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+
+.cf-page {
+  padding: 1.5rem;
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+@keyframes cf-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes cf-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cf-shimmer {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+.cf-animate-in {
+  opacity: 0;
+  animation: cf-fade-up 620ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.cf-animate-soft {
+  opacity: 0;
+  animation: cf-fade-in 420ms ease-out forwards;
+}
+
+.cf-stagger-1 {
+  animation-delay: 80ms;
+}
+
+.cf-stagger-2 {
+  animation-delay: 140ms;
+}
+
+.cf-stagger-3 {
+  animation-delay: 200ms;
+}
+
+.cf-stagger-4 {
+  animation-delay: 260ms;
+}
+
+.cf-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(255, 255, 255, 0.08) 45%,
+    rgba(255, 255, 255, 0) 70%
+  );
+  background-size: 220% 100%;
+  animation: cf-shimmer 3.6s linear infinite;
+}
+
+@media (max-width: 900px) {
+  .cf-page {
+    padding: 1rem;
+  }
 }
 
 ::-webkit-scrollbar { width: 6px; }

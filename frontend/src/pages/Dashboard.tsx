@@ -116,20 +116,21 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-6 space-y-10 max-w-7xl mx-auto">
+    <div className="cf-page space-y-10">
       {/* ── Hero greeting ── */}
-      <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-[24px] p-8 md:p-10">
-        <div className="absolute top-0 right-0 w-[400px] h-[400px] rounded-full bg-[oklch(0.65_0.25_25)]/[0.03] blur-3xl pointer-events-none" />
+      <div className="cf-animate-in relative overflow-hidden rounded-[2rem] border border-white/[0.1] bg-[linear-gradient(138deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02)_60%)] backdrop-blur-[28px] p-7 md:p-10">
+        <div className="absolute top-0 right-0 w-[440px] h-[440px] rounded-full bg-[oklch(0.65_0.25_25)]/[0.08] blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 right-[10%] w-72 h-72 rounded-full bg-cyan-400/10 blur-3xl pointer-events-none" />
         <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div>
-            <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/40 bg-white/[0.04] border border-white/[0.08] px-3 py-1.5 rounded-full mb-4">
+            <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.17em] text-white/55 bg-white/[0.05] border border-white/[0.14] px-3 py-1.5 rounded-full mb-4">
               <span className="w-1.5 h-1.5 rounded-full bg-[oklch(0.65_0.25_25)] animate-pulse" />
               {isNGO ? 'NGO Dashboard' : 'Donor Dashboard'}
             </div>
-            <h1 className="text-3xl md:text-4xl font-black text-white leading-tight mb-2">
+            <h1 className="cf-display text-3xl md:text-5xl text-white leading-tight mb-2">
               Good {greeting}, {user?.name?.split(' ')[0]}
             </h1>
-            <p className="text-base text-white/50 max-w-lg">
+            <p className="text-base text-white/65 max-w-lg">
               {isNGO
                 ? 'Manage your campaigns, track milestones, and see your impact grow in real time.'
                 : "Here's what's happening with your donations and the campaigns you support."}
@@ -159,19 +160,19 @@ export default function Dashboard() {
       </div>
 
       {/* ── Stat cards ── */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-4">Overview</p>
+      <div className="cf-animate-in cf-stagger-1">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-4">Overview</p>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {statCards.map(({ icon: Icon, label, value, sub }) => (
-            <GlassCard key={label} className="p-5">
+          {statCards.map(({ icon: Icon, label, value, sub }, i) => (
+            <GlassCard key={label} className="p-5 lg:p-6 cf-animate-in" style={{ animationDelay: `${180 + i * 70}ms` }}>
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold uppercase tracking-widest text-white/40">{label}</p>
-                <div className="w-8 h-8 rounded-xl bg-white/[0.06] flex items-center justify-center">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-white/45">{label}</p>
+                <div className="w-9 h-9 rounded-2xl bg-white/[0.06] flex items-center justify-center">
                   <Icon className="w-4 h-4 text-white/50" />
                 </div>
               </div>
-              <p className="text-2xl font-black text-white tabular-nums">{value}</p>
-              <p className="text-xs text-white/40 mt-1">{sub}</p>
+              <p className="cf-display text-2xl font-black text-white tabular-nums">{value}</p>
+              <p className="text-xs text-white/45 mt-1">{sub}</p>
             </GlassCard>
           ))}
         </div>
@@ -179,11 +180,11 @@ export default function Dashboard() {
 
       {/* ── NGO: My Campaigns section ── */}
       {isNGO && (
-        <div>
+        <div className="cf-animate-in cf-stagger-2">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">Your Projects</p>
-              <h2 className="text-2xl font-bold text-white">My Campaigns</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-1">Your Projects</p>
+              <h2 className="cf-section-title text-3xl font-bold text-white">My Campaigns</h2>
             </div>
             <button
               onClick={() => navigate('/ngo-studio')}
@@ -199,7 +200,7 @@ export default function Dashboard() {
           ) : (
             <GlassCard className="p-10 text-center">
               <Briefcase className="w-10 h-10 text-white/20 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-white mb-2">No campaigns yet</h3>
+              <h3 className="cf-section-title text-2xl font-semibold text-white mb-2">No campaigns yet</h3>
               <p className="text-sm text-white/40 mb-6 max-w-md mx-auto">
                 Create your first campaign to start receiving milestone-based funding from donors worldwide.
               </p>
@@ -214,11 +215,11 @@ export default function Dashboard() {
 
       {/* ── Donor: Recent donations ── */}
       {isDonor && donations.length > 0 && (
-        <div>
+        <div className="cf-animate-in cf-stagger-2">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">Your Impact</p>
-              <h2 className="text-2xl font-bold text-white">Recent Donations</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-1">Your Impact</p>
+              <h2 className="cf-section-title text-3xl font-bold text-white">Recent Donations</h2>
             </div>
             <button
               onClick={() => navigate('/my-donations')}
@@ -228,8 +229,12 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="grid gap-3">
-            {donations.slice(0, 4).map(d => (
-              <GlassCard key={d._id} className="p-4 flex items-center justify-between">
+            {donations.slice(0, 4).map((d, idx) => (
+              <GlassCard
+                key={d._id}
+                className="p-4 sm:p-5 flex items-center justify-between cf-animate-in"
+                style={{ animationDelay: `${240 + idx * 70}ms` }}
+              >
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 rounded-xl bg-[oklch(0.65_0.25_25)]/10 flex items-center justify-center">
                     <Heart className="w-5 h-5 text-[oklch(0.65_0.25_25)]" />
@@ -253,13 +258,13 @@ export default function Dashboard() {
       )}
 
       {/* ── Featured / Explore Campaigns ── */}
-      <div>
+      <div className="cf-animate-in cf-stagger-3">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">
-              {isNGO ? 'Platform Activity' : 'Discover'}
-            </p>
-            <h2 className="text-2xl font-bold text-white">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-1">
+                {isNGO ? 'Platform Activity' : 'Discover'}
+              </p>
+            <h2 className="cf-section-title text-3xl font-bold text-white">
               {isNGO ? 'Active Campaigns' : 'Featured Campaigns'}
             </h2>
           </div>
@@ -271,13 +276,14 @@ export default function Dashboard() {
           </button>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {featuredCampaigns.map(c => (
-            <CampaignCard
-              key={c._id}
-              campaign={c}
-              actionLabel={isDonor ? 'Invest' : undefined}
-              onAction={isDonor ? openInvest : undefined}
-            />
+          {featuredCampaigns.map((c, i) => (
+            <div key={c._id} className="cf-animate-in" style={{ animationDelay: `${190 + i * 70}ms` }}>
+              <CampaignCard
+                campaign={c}
+                actionLabel={isDonor ? 'Invest' : undefined}
+                onAction={isDonor ? openInvest : undefined}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -285,7 +291,7 @@ export default function Dashboard() {
       {isDonor && selectedCampaign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeInvest} />
-          <div className="relative w-full max-w-md rounded-2xl border border-white/15 bg-[rgb(18,18,18)] shadow-2xl p-6">
+          <div className="relative w-full max-w-md rounded-3xl border border-white/15 bg-[linear-gradient(150deg,rgba(20,20,24,0.96),rgba(13,13,16,0.96))] shadow-2xl p-6">
             <button
               onClick={closeInvest}
               disabled={investing}
@@ -296,7 +302,7 @@ export default function Dashboard() {
 
             {investResult ? (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold text-white">Investment Confirmed</h3>
+                <h3 className="cf-section-title text-2xl font-bold text-white">Investment Confirmed</h3>
                 <p className="text-sm text-white/60">
                   Donation was recorded for <span className="text-white font-semibold">{selectedCampaign.title}</span>.
                 </p>
@@ -318,7 +324,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold text-white">Confirm Investment</h3>
+                <h3 className="cf-section-title text-2xl font-bold text-white">Confirm Investment</h3>
                 <p className="text-sm text-white/60">
                   Send SOL from your donor wallet to this campaign vault.
                 </p>
@@ -337,7 +343,7 @@ export default function Dashboard() {
                     onChange={(e) => setInvestAmount(e.target.value)}
                     min="0.01"
                     step="0.01"
-                    className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+                    className="cf-soft-input"
                   />
                 </div>
                 <div className="grid grid-cols-3 gap-2">

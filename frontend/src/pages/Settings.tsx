@@ -20,7 +20,7 @@ export default function Settings() {
   })
   const [saving, setSaving] = useState(false)
 
-  const inputClass = "w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+  const inputClass = 'cf-soft-input'
 
   const saveProfile = async () => {
     setSaving(true)
@@ -41,21 +41,22 @@ export default function Settings() {
 
   const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
     <button onClick={onChange}
-      className={`w-10 h-6 rounded-full transition-all duration-300 relative ${checked ? 'bg-[oklch(0.65_0.25_25)]' : 'bg-white/15'}`}>
+      className={`w-11 h-6 rounded-full transition-all duration-300 relative ${checked ? 'bg-[oklch(0.65_0.25_25)]' : 'bg-white/15'}`}>
       <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all duration-300 ${checked ? 'left-5' : 'left-1'}`} />
     </button>
   )
 
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-1">Settings</h2>
-        <p className="text-sm text-white/50">Manage your account preferences.</p>
+    <div className="cf-page max-w-3xl space-y-6">
+      <div className="cf-animate-in">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-2">Preferences</p>
+        <h2 className="cf-section-title text-3xl sm:text-4xl font-bold text-white mb-1">Settings</h2>
+        <p className="text-sm text-white/55">Manage your account preferences.</p>
       </div>
 
       {/* Profile */}
-      <GlassCard className="p-6 space-y-5">
-        <h3 className="text-base font-semibold text-white">Profile</h3>
+      <GlassCard className="p-6 space-y-5 cf-animate-in cf-stagger-1">
+        <h3 className="cf-section-title text-xl font-semibold text-white">Profile</h3>
         <div className="flex items-center gap-4 pb-4 border-b border-white/[0.06]">
           <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center text-xl font-black text-white overflow-hidden">
             {user?.avatar
@@ -67,13 +68,13 @@ export default function Settings() {
             <p className="text-xs text-white/40 capitalize">{user?.role}</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Name</label>
+            <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Name</label>
             <input value={name} onChange={e => setName(e.target.value)} className={inputClass} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Email</label>
+            <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputClass} />
           </div>
         </div>
@@ -81,8 +82,8 @@ export default function Settings() {
       </GlassCard>
 
       {/* Notifications */}
-      <GlassCard className="p-6 space-y-4">
-        <h3 className="text-base font-semibold text-white">Notifications</h3>
+      <GlassCard className="p-6 space-y-4 cf-animate-in cf-stagger-2">
+        <h3 className="cf-section-title text-xl font-semibold text-white">Notifications</h3>
         {([
           ['milestoneUpdates', 'Milestone Updates', 'Get notified when milestones are approved or rejected'],
           ['donationReceipts', 'Donation Receipts', 'Email confirmation for every donation'],
@@ -100,21 +101,21 @@ export default function Settings() {
       </GlassCard>
 
       {/* Security */}
-      <GlassCard className="p-6 space-y-4">
-        <h3 className="text-base font-semibold text-white">Security</h3>
+      <GlassCard className="p-6 space-y-4 cf-animate-in cf-stagger-3">
+        <h3 className="cf-section-title text-xl font-semibold text-white">Security</h3>
         <div>
-          <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Current Password</label>
+          <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Current Password</label>
           <input type="password" value={currentPwd} onChange={e => setCurrentPwd(e.target.value)} placeholder="••••••••" className={inputClass} />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">New Password</label>
+          <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">New Password</label>
           <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} placeholder="••••••••" className={inputClass} />
         </div>
         <MetalButton onClick={savePassword} disabled={saving}>Change Password</MetalButton>
       </GlassCard>
 
       {/* Danger Zone */}
-      <GlassCard className="p-6 border-red-500/20">
+      <GlassCard className="p-6 border-red-500/20 cf-animate-in cf-stagger-4">
         <h3 className="text-base font-semibold text-red-400 mb-1">Danger Zone</h3>
         <p className="text-sm text-white/40 mb-4">Permanently delete your account and all associated data. This cannot be undone.</p>
         <MetalButton variant="error" onClick={() => toast.error('Account deletion requires email confirmation.')}>

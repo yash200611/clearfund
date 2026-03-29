@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Users, Shield, Clock, Activity, ExternalLink, Check, AlertTriangle } from 'lucide-react'
+import { Shield, Clock, Activity, ExternalLink, Check, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
@@ -79,8 +79,8 @@ export default function CampaignDetail() {
 
   if (!campaign) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="h-64 rounded-2xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+      <div className="cf-page max-w-6xl">
+        <div className="h-64 rounded-3xl bg-white/[0.03] border border-white/[0.08] animate-pulse" />
       </div>
     )
   }
@@ -91,24 +91,24 @@ export default function CampaignDetail() {
   const isDonor = user?.role === 'donor'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="cf-page max-w-6xl space-y-6">
       {/* Hero */}
-      <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden">
+      <div className="cf-animate-in relative h-64 md:h-80 rounded-[2rem] overflow-hidden border border-white/[0.08]">
         {campaign.image ? (
           <img src={campaign.image} alt={campaign.title} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full bg-white/[0.04] flex items-center justify-center">
-            <span className="text-6xl font-black text-white/10">{campaign.category?.[0]}</span>
+          <div className="w-full h-full bg-[linear-gradient(145deg,rgba(255,87,34,0.2),rgba(255,255,255,0.04),rgba(0,229,255,0.12))] flex items-center justify-center">
+            <span className="cf-display text-6xl text-white/40">{campaign.category?.[0]}</span>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
         <div className="absolute bottom-6 left-6 right-6">
           <div className="flex flex-wrap gap-2 mb-3">
             <StatusBadge status={campaign.status} />
             <TrustBadge score={campaign.trust_score} />
             <RiskBadge failureCount={campaign.failure_count} />
           </div>
-          <h1 className="text-2xl md:text-3xl font-black text-white">{campaign.title}</h1>
+          <h1 className="cf-display text-3xl md:text-4xl text-white">{campaign.title}</h1>
           <p className="text-white/60 text-sm mt-1">by {campaign.ngo_name} · {campaign.category}</p>
         </div>
       </div>
@@ -120,10 +120,10 @@ export default function CampaignDetail() {
           { label: 'Raised', value: `${raised.toFixed(2)} SOL` },
           { label: 'Milestones', value: String(milestones.length) },
           { label: 'Donors', value: campaign.donors_count != null ? String(campaign.donors_count) : '—' },
-        ].map(({ label, value }) => (
-          <GlassCard key={label} className="p-4 text-center">
-            <p className="text-xl font-black text-white tabular-nums">{value}</p>
-            <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mt-0.5">{label}</p>
+        ].map(({ label, value }, i) => (
+          <GlassCard key={label} className="p-4 text-center cf-animate-in" style={{ animationDelay: `${120 + i * 70}ms` }}>
+            <p className="cf-display text-xl font-black text-white tabular-nums">{value}</p>
+            <p className="text-xs text-white/42 uppercase tracking-[0.14em] font-semibold mt-0.5">{label}</p>
           </GlassCard>
         ))}
       </div>
@@ -131,14 +131,14 @@ export default function CampaignDetail() {
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Left — Description + Milestones */}
         <div className="lg:col-span-2 space-y-6">
-          <GlassCard className="p-6">
-            <h2 className="text-lg font-semibold text-white mb-3">About this Campaign</h2>
+          <GlassCard className="p-6 cf-animate-in cf-stagger-2">
+            <h2 className="cf-section-title text-2xl font-semibold text-white mb-3">About this Campaign</h2>
             <p className="text-sm text-white/60 leading-relaxed">{campaign.description}</p>
           </GlassCard>
 
           {milestones.length > 0 && (
-            <GlassCard className="p-6">
-              <h2 className="text-lg font-semibold text-white mb-6">Milestone Roadmap</h2>
+            <GlassCard className="p-6 cf-animate-in cf-stagger-3">
+              <h2 className="cf-section-title text-2xl font-semibold text-white mb-6">Milestone Roadmap</h2>
               <MilestoneTimeline milestones={milestones} />
             </GlassCard>
           )}
@@ -147,7 +147,7 @@ export default function CampaignDetail() {
         {/* Right — Donate + Risk + Activity */}
         <div className="space-y-4 lg:sticky lg:top-6 self-start">
           {/* Donation Card */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-6 cf-animate-in cf-stagger-2">
             {/* Success state */}
             {txResult ? (
               <div className="text-center space-y-4">
@@ -155,7 +155,7 @@ export default function CampaignDetail() {
                   <Check className="w-7 h-7 text-emerald-400" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-white">Donation Successful!</h3>
+                  <h3 className="cf-section-title text-2xl font-bold text-white">Donation Successful!</h3>
                   <p className="text-sm text-white/50 mt-1">{txResult.amount} SOL sent to escrow vault</p>
                 </div>
                 <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-3">
@@ -185,7 +185,7 @@ export default function CampaignDetail() {
                       <span className="font-semibold text-white">{pct}%</span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
-                      <div className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700" style={{ width: `${Math.min(100, pct)}%` }} />
+                      <div className="h-full bg-[linear-gradient(90deg,oklch(0.65_0.25_25),oklch(0.74_0.19_71))] rounded-full transition-all duration-700" style={{ width: `${Math.min(100, pct)}%` }} />
                     </div>
                     <div className="flex justify-between text-xs text-white/40 mt-2">
                       <span>{raised.toFixed(2)} SOL raised</span>
@@ -200,7 +200,7 @@ export default function CampaignDetail() {
                       <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Amount (SOL)</label>
                       <input
                         type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0.01" step="0.1"
-                        className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+                        className="cf-soft-input"
                       />
                       <div className="flex gap-2 mt-2">
                         {['0.1', '0.5', '1', '5'].map(v => (
@@ -244,7 +244,7 @@ export default function CampaignDetail() {
             )}
           </GlassCard>
 
-          <GlassCard className="p-5">
+          <GlassCard className="p-5 cf-animate-in cf-stagger-3">
             <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
               <Shield className="w-4 h-4 text-white/50" />
               Risk Assessment
@@ -274,7 +274,7 @@ export default function CampaignDetail() {
           </GlassCard>
 
           {activity.length > 0 && (
-            <GlassCard className="p-5">
+            <GlassCard className="p-5 cf-animate-in cf-stagger-4">
               <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                 <Activity className="w-4 h-4 text-white/50" />
                 Recent Activity

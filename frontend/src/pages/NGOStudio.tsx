@@ -48,25 +48,26 @@ export default function NGOStudio() {
     }
   }
 
-  const inputClass = "w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+  const inputClass = 'cf-soft-input'
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="cf-page max-w-6xl space-y-6">
+      <div className="cf-animate-in flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-white mb-1">NGO Studio</h2>
-          <p className="text-sm text-white/50">Manage your campaigns and launch new ones.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35 mb-2">Builder</p>
+          <h2 className="cf-section-title text-3xl sm:text-4xl font-bold text-white mb-1">NGO Studio</h2>
+          <p className="text-sm text-white/55">Manage your campaigns and launch new ones.</p>
         </div>
-        <button onClick={() => setTab(1)} className="flex items-center gap-1.5 text-sm text-[oklch(0.65_0.25_25)] hover:text-white transition-colors">
+        <button onClick={() => setTab(1)} className="hidden sm:flex items-center gap-1.5 text-sm text-[oklch(0.65_0.25_25)] hover:text-white transition-colors">
           <Plus className="w-4 h-4" />
           New Campaign
         </button>
       </div>
 
-      <div className="flex gap-1 bg-white/[0.04] border border-white/[0.06] rounded-xl p-1 w-fit">
+      <div className="cf-animate-in cf-stagger-1 flex gap-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl p-1.5 w-fit">
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)}
-            className={cn('px-4 py-2 rounded-lg text-sm font-medium transition-all', i === tab ? 'bg-white/[0.10] text-white' : 'text-white/50 hover:text-white')}>
+            className={cn('px-4 py-2.5 rounded-xl text-sm font-medium transition-all', i === tab ? 'bg-[linear-gradient(130deg,rgba(255,255,255,0.14),rgba(255,255,255,0.06))] text-white' : 'text-white/50 hover:text-white')}>
             {t}
           </button>
         ))}
@@ -75,35 +76,39 @@ export default function NGOStudio() {
       {tab === 0 ? (
         <div>
           {campaigns.length === 0 ? (
-            <GlassCard className="p-12 text-center">
-              <p className="text-white/40 text-lg font-semibold mb-2">No campaigns yet</p>
+            <GlassCard className="p-12 text-center cf-animate-in cf-stagger-2">
+              <p className="cf-section-title text-white/80 text-2xl font-semibold mb-2">No campaigns yet</p>
               <p className="text-white/30 text-sm mb-6">Launch your first campaign to start receiving escrow-protected donations.</p>
               <LiquidButton onClick={() => setTab(1)}>LAUNCH CAMPAIGN</LiquidButton>
             </GlassCard>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {campaigns.map(c => <CampaignCard key={c._id} campaign={c} />)}
+              {campaigns.map((c, i) => (
+                <div key={c._id} className="cf-animate-in" style={{ animationDelay: `${180 + i * 60}ms` }}>
+                  <CampaignCard campaign={c} />
+                </div>
+              ))}
             </div>
           )}
         </div>
       ) : (
-        <GlassCard className="p-8 max-w-2xl">
-          <h3 className="text-lg font-semibold text-white mb-6">Launch a New Campaign</h3>
+        <GlassCard className="p-8 max-w-2xl cf-animate-in cf-stagger-2">
+          <h3 className="cf-section-title text-2xl font-semibold text-white mb-6">Launch a New Campaign</h3>
           <form onSubmit={handleCreate} className="space-y-5">
             <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Campaign Title</label>
+              <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Campaign Title</label>
               <input value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} required
                 placeholder="e.g. Mobile Clinic for Rural Communities" className={inputClass} />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Description</label>
+              <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Description</label>
               <textarea value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} required
                 placeholder="Describe your campaign, goals, and impact..." rows={4}
                 className={cn(inputClass, 'resize-none')} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Category</label>
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Category</label>
                 <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
                   className={inputClass}>
                   {['Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate', 'Food Security'].map(c => (
@@ -112,7 +117,7 @@ export default function NGOStudio() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Vault Address (optional)</label>
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.14em] mb-2">Vault Address (optional)</label>
                 <input value={form.vault_address} onChange={e => setForm(f => ({...f, vault_address: e.target.value}))}
                   placeholder="Solana vault address" className={inputClass} />
               </div>
