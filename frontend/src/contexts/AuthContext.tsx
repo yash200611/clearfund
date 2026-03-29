@@ -24,6 +24,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const ROLE_CLAIM = 'https://clearfund.app/role';
+const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE || 'https://clearfund.app';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const {
@@ -40,7 +41,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isAuthenticated) {
-      setTokenGetter(getAccessTokenSilently);
+      setTokenGetter(() =>
+        getAccessTokenSilently({ authorizationParams: { audience: AUTH0_AUDIENCE } })
+      );
     }
   }, [isAuthenticated, getAccessTokenSilently]);
 
@@ -54,20 +57,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function fetchProfile() {
       setProfileLoading(true);
       try {
-        const token = await getAccessTokenSilently();
+        const token = await getAccessTokenSilently({ authorizationParams: { audience: AUTH0_AUDIENCE } });
         const res = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const profile = await res.json();
-          setAppUser({
-            id: profile._id ?? profile.id ?? u.sub ?? '',
-            name: u.name ?? u.email ?? '',
-            email: u.email ?? '',
-            role: profile.role ?? (u[ROLE_CLAIM] as AppUser['role']) ?? null,
-            avatar: u.picture,
-            wallet_address: profile.wallet_address,
-          });
+          if (profile && typeof profile === 'object') {
+            setAppUser({
+              id: profile._id ?? profile.id ?? u.sub ?? '',
+              name: u.name ?? u.email ?? '',
+              email: u.email ?? '',
+              role: profile.role ?? (u[ROLE_CLAIM] as AppUser['role']) ?? null,
+              avatar: u.picture,
+              wallet_address: profile.wallet_address,
+            });
+          } else {
+            setAppUser({
+              id: u.sub ?? '',
+              name: u.name ?? u.email ?? '',
+              email: u.email ?? '',
+              role: (u[ROLE_CLAIM] as AppUser['role']) ?? null,
+              avatar: u.picture,
+            });
+          }
         } else {
           setAppUser({
             id: u.sub ?? '',
