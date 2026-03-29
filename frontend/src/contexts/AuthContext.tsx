@@ -131,7 +131,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     auth0Logout({
       logoutParams: {
         returnTo: window.location.origin,
-        federated: true,
       },
     });
   }, [auth0Logout]);
