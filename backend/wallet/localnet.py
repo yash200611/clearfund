@@ -72,12 +72,20 @@ def sign_and_send(
     )
     tx = SoldersTransaction([kp], msg, recent_blockhash)
     result = client.send_transaction(tx)
-    sig = str(result.value)
+    sig = result.value
+    # Wait for confirmation so getTransaction can find it immediately
+    import time
+    for _ in range(20):
+        status = client.confirm_transaction(sig)
+        if status.value and len(status.value) > 0 and status.value[0] is not None:
+            break
+        time.sleep(0.3)
+    sig_str = str(sig)
     logger.info(
         "localnet transfer %s -> %s  %.4f SOL  sig=%s",
-        str(from_pubkey), to_address, amount_sol, sig,
+        str(from_pubkey), to_address, amount_sol, sig_str,
     )
-    return sig
+    return sig_str
 
 
 def get_balance(address: str, rpc_url: Optional[str] = None) -> float:

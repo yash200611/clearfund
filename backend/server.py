@@ -523,8 +523,8 @@ async def _fetch_transaction(signature: str) -> dict:
             },
         ],
     }
-    # On localnet, the transaction may not be indexed yet. Retry a few times.
-    max_attempts = 5 if SOLANA_NETWORK.lower() == "localnet" else 1
+    # On localnet, the transaction may not be indexed yet. Retry with backoff.
+    max_attempts = 10 if SOLANA_NETWORK.lower() == "localnet" else 1
     body = None
     for attempt in range(max_attempts):
         try:
@@ -536,13 +536,13 @@ async def _fetch_transaction(signature: str) -> dict:
             logger.exception("[DonationTransfer] Solana RPC failed sig=%s error=%s", signature, str(e))
             if attempt == max_attempts - 1:
                 raise HTTPException(status_code=503, detail="Unable to verify transaction on Solana RPC")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             continue
 
         if body.get("result") is not None:
             break
         if attempt < max_attempts - 1:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
 
     if "error" in body:
         logger.warning(
