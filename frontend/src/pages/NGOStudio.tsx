@@ -52,13 +52,17 @@ export default function NGOStudio() {
       pollCountRef.current += 1
       try {
         const c = await getCampaignById(campaignId)
-        if (c.status !== 'under_review') {
+        const recommendation = c.campaign_review?.recommendation
+        const reviewedAt = c.campaign_review?.reviewed_at
+        const hasGeminiDecision = Boolean(reviewedAt || (recommendation && recommendation !== 'pending'))
+
+        if (c.status !== 'under_review' || hasGeminiDecision) {
           clearInterval(pollRef.current!)
           pollRef.current = null
           setReview(prev => prev ? {
             ...prev,
             phase: 'completed',
-            recommendation: c.campaign_review?.recommendation,
+            recommendation,
             status: c.status,
             trust_score: c.trust_score,
             reasoning: c.campaign_review?.reasoning,
@@ -71,8 +75,15 @@ export default function NGOStudio() {
       if (pollCountRef.current >= MAX_POLLS) {
         clearInterval(pollRef.current!)
         pollRef.current = null
-        // Timed out — show what we have
-        setReview(prev => prev ? { ...prev, phase: 'completed', status: 'under_review' } : prev)
+        // Timed out — surface this explicitly so it doesn't look like a completed review.
+        setReview(prev => prev ? {
+          ...prev,
+          phase: 'completed',
+          status: 'under_review',
+          recommendation: 'pending',
+          reasoning: 'Gemini review is still processing or unavailable. Check backend logs for the campaign review result.',
+          risk_flags: ['campaign_review_pending'],
+        } : prev)
         loadMyCampaigns()
       }
     }, POLL_INTERVAL_MS)
@@ -127,7 +138,11 @@ export default function NGOStudio() {
               )}
               <div>
                 <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">
-                  {review.phase === 'started' ? 'Gemini is reviewing your campaign...' : 'Review Complete'}
+                  {review.phase === 'started'
+                    ? 'Gemini is reviewing your campaign...'
+                    : review.recommendation === 'pending'
+                      ? 'Review Still In Progress'
+                      : 'Review Complete'}
                 </p>
                 <p className="text-white font-semibold text-sm mt-0.5 line-clamp-1">{review.title}</p>
               </div>
@@ -155,6 +170,11 @@ export default function NGOStudio() {
                     {review.status === 'active' ? 'Approved — Live' :
                      review.status === 'rejected' ? 'Rejected' : 'Under Review'}
                   </span>
+                  {review.recommendation && (
+                    <span className="text-xs text-white/50 uppercase tracking-widest">
+                      Model decision: <span className="text-white/80">{review.recommendation}</span>
+                    </span>
+                  )}
                   {review.trust_score !== undefined && (
                     <span className="text-xs text-white/50">
                       Trust score: <span className="text-white font-semibold">{review.trust_score}%</span>

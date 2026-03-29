@@ -6,12 +6,14 @@ Gemini-based first-pass review for newly launched campaigns.
 import asyncio
 import json
 import os
+import logging
 from typing import Any
 
 import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger("clearfund.campaign_review")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 MODEL_NAME = os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-flash")
@@ -32,8 +34,15 @@ def _default_under_review(reason: str) -> dict[str, Any]:
 
 def _review_sync(campaign: dict) -> dict[str, Any]:
     if not GEMINI_API_KEY:
+        logger.warning("[CampaignReviewAgent] GEMINI_API_KEY is missing")
         return _default_under_review("Gemini API key is not configured")
 
+    logger.info(
+        "[CampaignReviewAgent] running model=%s title=%s ngo=%s",
+        MODEL_NAME,
+        campaign.get("title", ""),
+        campaign.get("ngo_name", campaign.get("ngo_id", "")),
+    )
     model = genai.GenerativeModel(MODEL_NAME)
 
     prompt = f"""You are ClearFund's campaign intake reviewer.
@@ -65,12 +74,21 @@ Rules:
 
     response = model.generate_content(prompt)
     text = (response.text or "").strip()
+    logger.info("[CampaignReviewAgent] raw response length=%s", len(text))
 
     if text.startswith("```"):
         lines = text.split("\n")
         text = "\n".join(lines[1:-1]) if lines and lines[-1] == "```" else "\n".join(lines[1:])
 
-    parsed = json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "[CampaignReviewAgent] JSON parse failed error=%s preview=%s",
+            str(e),
+            text[:240],
+        )
+        raise
 
     recommendation = str(parsed.get("recommendation", "needs_info"))
     if recommendation not in {"approve", "reject", "needs_info"}:
@@ -89,5 +107,5 @@ async def run_campaign_review_agent(campaign: dict) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(_review_sync, campaign)
     except Exception as e:
+        logger.exception("[CampaignReviewAgent] review failed error=%s", str(e))
         return _default_under_review(f"Gemini review failed: {e}")
-

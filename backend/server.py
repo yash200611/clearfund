@@ -295,6 +295,15 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
         )
 
         result = await run_campaign_review_agent(campaign)
+        logger.info(
+            "[CampaignReview] agent_result campaign_id=%s recommendation=%s confidence=%s trust_score=%s risk_flags=%s reasoning=%s",
+            campaign_id,
+            result.get("recommendation"),
+            result.get("confidence_score"),
+            result.get("trust_score"),
+            result.get("risk_flags"),
+            str(result.get("reasoning", ""))[:300],
+        )
 
         recommendation = str(result.get("recommendation", "needs_info"))
         trust_score = int(result.get("trust_score", campaign.get("trust_score", 0) or 0))
