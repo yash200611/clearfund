@@ -10,7 +10,12 @@ from jose import JWTError, jwt
 
 load_dotenv()
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
+AUTH0_DOMAIN = (
+    os.getenv("AUTH0_DOMAIN", "")
+    .replace("https://", "")
+    .replace("http://", "")
+    .strip("/")
+)
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 ALGORITHMS = ["RS256"]
 ROLE_CLAIM = "https://clearfund.app/role"
@@ -20,10 +25,21 @@ security = HTTPBearer()
 
 @lru_cache(maxsize=1)
 def get_jwks() -> dict:
+    if not AUTH0_DOMAIN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AUTH0_DOMAIN is not configured",
+        )
     url = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
-    response = httpx.get(url, timeout=10)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = httpx.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to fetch Auth0 JWKS",
+        )
 
 
 def decode_token(token: str) -> dict:
@@ -57,10 +73,17 @@ def decode_token(token: str) -> dict:
         )
         return payload
 
+    except HTTPException:
+        raise
     except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {str(e)}",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token validation failed",
         )
 
 
