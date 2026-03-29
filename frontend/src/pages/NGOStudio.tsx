@@ -17,7 +17,7 @@ export default function NGOStudio() {
   const [tab, setTab] = useState(0)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare', vault_address: '' })
+  const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare' })
 
   const loadMyCampaigns = () => {
     getCampaigns()
@@ -35,10 +35,9 @@ export default function NGOStudio() {
         title: form.title,
         description: form.description,
         category: form.category,
-        vault_address: form.vault_address || undefined,
       })
       toast.success('Campaign launched! It will go live after review.')
-      setForm({ title: '', description: '', category: 'Healthcare', vault_address: '' })
+      setForm({ title: '', description: '', category: 'Healthcare' })
       setTab(0)
       loadMyCampaigns()
     } catch (err) {
@@ -112,11 +111,7 @@ export default function NGOStudio() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Vault Address (optional)</label>
-                <input value={form.vault_address} onChange={e => setForm(f => ({...f, vault_address: e.target.value}))}
-                  placeholder="Solana vault address" className={inputClass} />
-              </div>
+
             </div>
             <div className="flex gap-3 pt-2">
               <LiquidButton type="submit" disabled={saving}>

@@ -58,8 +58,7 @@ class PrivyClient:
                 json={
                     "chain_type": "solana",
                     "owner": {
-                        "type": "user",
-                        "did": f"did:privy:{owner_id}",
+                        "type": "server",
                     },
                 },
             )
