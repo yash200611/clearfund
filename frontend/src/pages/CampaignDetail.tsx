@@ -61,7 +61,13 @@ export default function CampaignDetail() {
       let txWalletAddress = ''
       let txExplorerUrl = ''
 
-      if (user?.wallet_address) {
+      const isLocalnet = (import.meta.env.VITE_SOLANA_NETWORK as string | undefined) === 'localnet'
+
+      if (user?.wallet_address || isLocalnet) {
+        if (!user?.wallet_address) {
+          toast.error('Wallet not provisioned yet. Please wait a moment and try again.')
+          return
+        }
         const tx = await signTransfer({
           campaign_id: id,
           amount_sol: sol,
