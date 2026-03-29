@@ -496,9 +496,13 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
         logger.exception("[CampaignReview] failed campaign_id=%s error=%s", campaign_id, str(e))
 
 
+SOLANA_EXPLORER_RPC = os.getenv("SOLANA_EXPLORER_RPC", "")
+
 def _solana_explorer_url(signature: str) -> str:
     if SOLANA_NETWORK.lower() == "localnet":
-        return f"{EXPLORER_BASE}/{signature}?cluster=custom&customUrl=http%3A%2F%2F127.0.0.1%3A8899"
+        rpc = SOLANA_EXPLORER_RPC or SOLANA_RPC_URL
+        from urllib.parse import quote
+        return f"{EXPLORER_BASE}/{signature}?cluster=custom&customUrl={quote(rpc, safe='')}"
     return f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
 
 
