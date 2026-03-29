@@ -9,13 +9,17 @@ export default function RoleSelect() {
   const navigate = useNavigate()
   const [selected, setSelected] = useState<'donor' | 'ngo' | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleContinue = async () => {
     if (!selected) return
     setLoading(true)
+    setError(null)
     try {
       await setRole(selected)
       navigate('/dashboard', { replace: true })
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -112,6 +116,11 @@ export default function RoleSelect() {
             )
           })}
         </div>
+
+        {/* Error */}
+        {error && (
+          <p className="text-center text-sm text-red-400 mb-4">{error}</p>
+        )}
 
         {/* Continue button */}
         <div className="flex justify-center">

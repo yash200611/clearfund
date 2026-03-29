@@ -35,9 +35,16 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 app = FastAPI(title="Milestone Escrow API")
 
+_allowed_origins = list(filter(None, [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    FRONTEND_URL,
+    "https://clearfund-lovat.vercel.app",
+]))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", FRONTEND_URL],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
