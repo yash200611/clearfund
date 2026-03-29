@@ -2,7 +2,7 @@
 // In local dev, VITE_API_URL can point to the backend directly (e.g. http://localhost:8000).
 const configuredApiBase = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 const API_BASE = import.meta.env.DEV ? (configuredApiBase || '') : '';
-const API_TIMEOUT_MS = Number((import.meta.env.VITE_API_TIMEOUT_MS as string | undefined) ?? '20000');
+const API_TIMEOUT_MS = Number((import.meta.env.VITE_API_TIMEOUT_MS as string | undefined) ?? '45000');
 
 // Token getter — set by AuthContext after Auth0 authenticates
 let _getToken: (() => Promise<string>) | null = null;
