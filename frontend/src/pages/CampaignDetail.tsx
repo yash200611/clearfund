@@ -10,7 +10,7 @@ import { RiskBadge } from '@/components/RiskBadge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { useAuth } from '@/contexts/AuthContext'
-import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer } from '@/api/client'
+import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer, signPrivyTransfer } from '@/api/client'
 import type { Campaign, Milestone } from '@/api/client'
 import { transferSolToVault } from '@/lib/solanaTransfer'
 
@@ -54,16 +54,34 @@ export default function CampaignDetail() {
     setDonating(true)
     setTxResult(null)
     try {
-      const tx = await transferSolToVault(campaign.vault_address, sol)
+      let txSignature = ''
+      let txWalletAddress = ''
+      let txExplorerUrl = ''
+
+      if (user?.wallet_address) {
+        const tx = await signPrivyTransfer({
+          campaign_id: id,
+          amount_sol: sol,
+        })
+        txSignature = tx.signature
+        txWalletAddress = tx.wallet_address
+        txExplorerUrl = tx.explorer_url
+      } else {
+        const tx = await transferSolToVault(campaign.vault_address, sol)
+        txSignature = tx.signature
+        txWalletAddress = tx.walletAddress
+        txExplorerUrl = tx.explorerUrl
+      }
+
       const result = await donateTransfer({
         campaign_id: id,
         amount_sol: sol,
-        tx_signature: tx.signature,
-        wallet_address: tx.walletAddress,
+        tx_signature: txSignature,
+        wallet_address: txWalletAddress,
       })
       setTxResult({
         signature: result.tx_signature ?? result.solana_tx,
-        explorerUrl: result.explorer_url ?? tx.explorerUrl,
+        explorerUrl: result.explorer_url ?? txExplorerUrl,
         amount: sol,
       })
       // Update local campaign state

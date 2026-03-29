@@ -11,7 +11,7 @@ import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
 import { useAuth } from '@/contexts/AuthContext'
-import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics } from '@/api/client'
+import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics, signPrivyTransfer } from '@/api/client'
 import type { Campaign, Donation } from '@/api/client'
 import { transferSolToVault } from '@/lib/solanaTransfer'
 
@@ -88,12 +88,30 @@ export default function Dashboard() {
 
     setInvesting(true)
     try {
-      const tx = await transferSolToVault(selectedCampaign.vault_address, amountSol)
+      let txSignature = ''
+      let txWalletAddress = ''
+      let txExplorerUrl = ''
+
+      if (user?.wallet_address) {
+        const tx = await signPrivyTransfer({
+          campaign_id: selectedCampaign._id,
+          amount_sol: amountSol,
+        })
+        txSignature = tx.signature
+        txWalletAddress = tx.wallet_address
+        txExplorerUrl = tx.explorer_url
+      } else {
+        const tx = await transferSolToVault(selectedCampaign.vault_address, amountSol)
+        txSignature = tx.signature
+        txWalletAddress = tx.walletAddress
+        txExplorerUrl = tx.explorerUrl
+      }
+
       const donation = await donateTransfer({
         campaign_id: selectedCampaign._id,
         amount_sol: amountSol,
-        tx_signature: tx.signature,
-        wallet_address: tx.walletAddress,
+        tx_signature: txSignature,
+        wallet_address: txWalletAddress,
       })
 
       setCampaigns(prev => prev.map(c => (
@@ -104,7 +122,7 @@ export default function Dashboard() {
       setDonations(prev => [donation, ...prev])
       setInvestResult({
         signature: donation.tx_signature ?? donation.solana_tx,
-        explorerUrl: donation.explorer_url ?? tx.explorerUrl,
+        explorerUrl: donation.explorer_url ?? txExplorerUrl,
       })
       toast.success(`${amountSol} SOL sent to campaign vault`)
     } catch (e: unknown) {

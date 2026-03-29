@@ -202,6 +202,12 @@ export interface DonateTransferResult extends Donation {
   explorer_url: string;
 }
 
+export interface PrivyTransferSignResult {
+  signature: string;
+  wallet_address: string;
+  explorer_url: string;
+}
+
 export async function donateTransfer(data: {
   campaign_id: string;
   amount_sol: number;
@@ -209,6 +215,16 @@ export async function donateTransfer(data: {
   wallet_address: string;
 }): Promise<DonateTransferResult> {
   return apiFetch<DonateTransferResult>('/api/donations/transfer', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function signPrivyTransfer(data: {
+  campaign_id: string;
+  amount_sol: number;
+}): Promise<PrivyTransferSignResult> {
+  return apiFetch<PrivyTransferSignResult>('/api/wallets/privy/transfer-sign', {
     method: 'POST',
     body: JSON.stringify(data),
   });
