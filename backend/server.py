@@ -14,7 +14,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from auth import TokenData, decode_token, get_current_user, require_donor, require_ngo, require_verifier
+from auth import (
+    AUTH0_AUDIENCE,
+    AUTH0_DOMAIN,
+    TokenData,
+    decode_token,
+    get_current_user,
+    get_jwks,
+    require_donor,
+    require_ngo,
+    require_verifier,
+)
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
 from analytics.lava_client import LavaClient
@@ -143,6 +153,11 @@ async def startup():
         LOG_LEVEL,
     )
     logger.info("[Startup] Allowed CORS origins=%s", _allowed_origins)
+    logger.info(
+        "[Startup] Auth config AUTH0_DOMAIN=%s AUTH0_AUDIENCE=%s",
+        AUTH0_DOMAIN,
+        AUTH0_AUDIENCE,
+    )
     mongo_client = AsyncIOMotorClient(
         MONGO_URL,
         tls=True,
@@ -155,6 +170,13 @@ async def startup():
         logger.info("[Startup] Mongo ping OK")
     except Exception as e:
         logger.exception("[Startup] Mongo ping failed error=%s", str(e))
+    try:
+        jwks = get_jwks()
+        logger.info("[Startup] JWKS preflight OK key_count=%s", len(jwks.get("keys", [])))
+    except HTTPException as e:
+        logger.warning("[Startup] JWKS preflight failed status=%s detail=%s", e.status_code, e.detail)
+    except Exception as e:
+        logger.exception("[Startup] JWKS preflight unexpected error=%s", str(e))
     try:
         lava_client = LavaClient()
         logger.info("[Startup] Lava client initialized")
