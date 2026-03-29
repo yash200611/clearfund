@@ -102,8 +102,20 @@ export default function NGOStudio() {
       })
       const title = form.title
       setForm({ title: '', description: '', category: 'Healthcare' })
-      setReview({ campaignId: campaign._id, title, phase: 'started' })
-      startPolling(campaign._id)
+      setReview({
+        campaignId: campaign._id,
+        title,
+        phase: campaign.status === 'under_review' ? 'started' : 'completed',
+        recommendation: campaign.campaign_review?.recommendation,
+        status: campaign.status,
+        trust_score: campaign.trust_score,
+        reasoning: campaign.campaign_review?.reasoning,
+        risk_flags: campaign.campaign_review?.risk_flags,
+      })
+      loadMyCampaigns()
+      if (campaign.status === 'under_review') {
+        startPolling(campaign._id)
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create campaign. Please try again.'
       toast.error(msg)

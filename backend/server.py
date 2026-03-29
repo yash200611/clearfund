@@ -582,12 +582,47 @@ async def list_campaigns(
 @app.post("/api/campaigns", status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     body: CreateCampaignRequest,
-    background_tasks: BackgroundTasks,
     user: TokenData = Depends(require_ngo_role),
 ):
     ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not ngo_doc:
         raise HTTPException(status_code=404, detail="User not found")
+
+    MIN_TRUST_SCORE = 60
+    ngo_name = ngo_doc.get("name") or ngo_doc.get("email") or "NGO"
+
+    # Hard intake gate: do not create DB record unless Gemini approves with trust >= threshold.
+    review_input = {
+        "title": body.title,
+        "description": body.description,
+        "category": body.category,
+        "ngo_name": ngo_name,
+        # Vault is provisioned only after passing review.
+        "vault_address": "pending",
+    }
+    review_result = await run_campaign_review_agent(review_input)
+    recommendation = str(review_result.get("recommendation", "needs_info"))
+    trust_score = int(review_result.get("trust_score", 0) or 0)
+    trust_score = max(0, min(100, trust_score))
+    reasoning = str(review_result.get("reasoning", "No reasoning provided"))
+    risk_flags = review_result.get("risk_flags", [])
+    logger.info(
+        "[CampaignCreate] intake_result sub=%s recommendation=%s trust_score=%s risk_flags=%s reasoning=%s",
+        user.sub,
+        recommendation,
+        trust_score,
+        risk_flags,
+        reasoning[:300],
+    )
+
+    if recommendation != "approve" or trust_score < MIN_TRUST_SCORE:
+        rejection_reason = (
+            f"Campaign did not pass intake review. "
+            f"recommendation={recommendation}, trust_score={trust_score}, minimum_required={MIN_TRUST_SCORE}. "
+            f"{reasoning}"
+        )
+        logger.warning("[CampaignCreate] rejected sub=%s reason=%s", user.sub, rejection_reason)
+        raise HTTPException(status_code=422, detail=rejection_reason)
 
     campaign_oid = ObjectId()
     campaign_id = str(campaign_oid)
@@ -624,30 +659,35 @@ async def create_campaign(
     campaign = {
         "_id": campaign_oid,
         "ngo_id": str(ngo_doc["_id"]),
-        "ngo_name": ngo_doc.get("name") or ngo_doc.get("email") or "NGO",
+        "ngo_name": ngo_name,
         "title": body.title,
         "description": body.description,
         "category": body.category,
         "total_raised_sol": 0.0,
         "vault_address": vault_wallet["address"],
         "privy_vault_wallet_id": vault_wallet["wallet_id"],
-        "status": "under_review",
-        "trust_score": 0.0,
+        "status": "active",
+        "trust_score": trust_score,
         "failure_count": 0,
         "campaign_review": {
-            "recommendation": "pending",
-            "confidence_score": 0,
-            "reasoning": "Queued for Gemini intake review",
-            "risk_flags": [],
-            "reviewed_at": None,
+            "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-flash"),
+            "recommendation": recommendation,
+            "confidence_score": int(review_result.get("confidence_score", 0)),
+            "reasoning": reasoning,
+            "risk_flags": risk_flags if isinstance(risk_flags, list) else [str(risk_flags)],
+            "reviewed_at": datetime.now(timezone.utc),
         },
         "created_at": datetime.now(timezone.utc),
     }
     await db.campaigns.insert_one(campaign)
     campaign["_id"] = campaign_id
 
-    logger.info("[CampaignReview] queued campaign_id=%s title=%s", campaign_id, campaign.get("title"))
-    background_tasks.add_task(_run_campaign_intake_review, campaign_id)
+    logger.info(
+        "[CampaignCreate] created campaign_id=%s title=%s trust_score=%s",
+        campaign_id,
+        campaign.get("title"),
+        trust_score,
+    )
 
     return public_campaign(campaign)
 
