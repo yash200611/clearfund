@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel
 
 from auth import (
     AUTH0_AUDIENCE,
@@ -24,6 +25,7 @@ from auth import (
     get_jwks,
 )
 from agents.campaign_review_agent import run_campaign_review_agent
+from executor.escrow_executor import EscrowExecutor
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
 from analytics.lava_client import LavaClient
@@ -770,6 +772,100 @@ async def create_donation(
         {"$inc": {"total_raised_sol": body.amount_sol}},
     )
     return donation
+
+
+class PrivyTransferSignRequest(BaseModel):
+    campaign_id: str
+    amount_sol: float
+
+
+@app.post("/api/wallets/privy/transfer-sign")
+async def sign_privy_transfer(
+    body: PrivyTransferSignRequest,
+    user: TokenData = Depends(require_donor_role),
+):
+    donor_doc = await db.users.find_one({"auth0_sub": user.sub})
+    if not donor_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    donor_wallet = donor_doc.get("wallet_address")
+    privy_wallet_id = donor_doc.get("privy_wallet_id")
+    if not donor_wallet or not privy_wallet_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Privy wallet not provisioned for this donor account",
+        )
+
+    if body.amount_sol <= 0:
+        raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
+
+    if not ObjectId.is_valid(body.campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "active":
+        raise HTTPException(status_code=422, detail="Campaign is under review and not accepting donations yet")
+
+    vault_address = campaign.get("vault_address")
+    if not vault_address:
+        raise HTTPException(status_code=422, detail="Campaign has no vault_address")
+
+    try:
+        executor = EscrowExecutor()
+        tx_b64 = executor._build_transfer_tx(
+            from_address=donor_wallet,
+            to_address=vault_address,
+            amount_sol=body.amount_sol,
+        )
+    except Exception as e:
+        logger.exception(
+            "[PrivyTransfer] failed to build tx donor=%s vault=%s amount_sol=%.9f error=%s",
+            donor_wallet,
+            vault_address,
+            body.amount_sol,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to prepare Solana transfer transaction",
+        )
+
+    try:
+        privy = PrivyClient()
+        signature = await privy.sign_and_send_transaction(privy_wallet_id, tx_b64)
+    except httpx.TimeoutException:
+        logger.warning(
+            "[PrivyTransfer] signing timeout donor=%s campaign_id=%s",
+            str(donor_doc.get("_id")),
+            body.campaign_id,
+        )
+        raise HTTPException(status_code=504, detail="Privy signing timed out")
+    except Exception as e:
+        logger.exception(
+            "[PrivyTransfer] signing failed donor=%s campaign_id=%s wallet_id=%s error=%s",
+            str(donor_doc.get("_id")),
+            body.campaign_id,
+            privy_wallet_id,
+            str(e),
+        )
+        raise HTTPException(status_code=503, detail="Unable to sign transfer with Privy wallet")
+
+    logger.info(
+        "[PrivyTransfer] signed donor_id=%s campaign_id=%s donor_wallet=%s vault=%s amount_sol=%.9f tx=%s",
+        str(donor_doc.get("_id")),
+        body.campaign_id,
+        donor_wallet,
+        vault_address,
+        body.amount_sol,
+        signature,
+    )
+
+    return {
+        "signature": signature,
+        "wallet_address": donor_wallet,
+        "explorer_url": _solana_explorer_url(signature),
+    }
 
 
 @app.post("/api/donations/transfer", status_code=status.HTTP_201_CREATED)
