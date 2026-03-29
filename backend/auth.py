@@ -180,7 +180,8 @@ async def get_current_user(
     payload = decode_token(token)
     sub = payload.get("sub")
     email = payload.get("email", "")
-    role = payload.get(ROLE_CLAIM, "donor")
+    # Role claim may be missing for normal users; app role is stored in MongoDB.
+    role = payload.get(ROLE_CLAIM)
     if not sub:
         logger.warning("[Auth] Token missing sub claim payload_keys=%s", list(payload.keys()))
         raise HTTPException(

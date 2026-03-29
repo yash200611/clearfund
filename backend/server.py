@@ -21,9 +21,6 @@ from auth import (
     decode_token,
     get_current_user,
     get_jwks,
-    require_donor,
-    require_ngo,
-    require_verifier,
 )
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
@@ -141,6 +138,42 @@ async def log_unhandled_exception(request: Request, exc: Exception):
 mongo_client: AsyncIOMotorClient = None
 db = None
 lava_client: Optional[LavaClient] = None
+
+
+async def resolve_app_user(user: TokenData = Depends(get_current_user)) -> TokenData:
+    """
+    Resolve effective role from DB first (source of truth), then fallback to token claim.
+    This prevents Auth0 claim drift from breaking app role selection.
+    """
+    token_role = user.role
+    doc = await db.users.find_one({"auth0_sub": user.sub}, {"role": 1})
+    db_role = doc.get("role") if doc else None
+    effective_role = db_role or token_role
+    user.role = effective_role
+    logger.info(
+        "[Authz] sub=%s token_role=%s db_role=%s effective_role=%s",
+        user.sub,
+        token_role,
+        db_role,
+        effective_role,
+    )
+    return user
+
+
+def require_roles(*allowed_roles: str):
+    async def _dep(user: TokenData = Depends(resolve_app_user)) -> TokenData:
+        if user.role not in allowed_roles and user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{'/'.join(allowed_roles)} access required",
+            )
+        return user
+    return _dep
+
+
+require_donor_role = require_roles("donor")
+require_ngo_role = require_roles("ngo")
+require_verifier_role = require_roles("verifier")
 
 
 @app.on_event("startup")
@@ -269,7 +302,7 @@ async def list_campaigns():
 @app.post("/api/campaigns", status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     body: CreateCampaignRequest,
-    user: TokenData = Depends(require_ngo),
+    user: TokenData = Depends(require_ngo_role),
 ):
     ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not ngo_doc:
@@ -314,7 +347,7 @@ async def get_campaign(campaign_id: str):
 @app.post("/api/donations", status_code=status.HTTP_201_CREATED)
 async def create_donation(
     body: CreateDonationRequest,
-    user: TokenData = Depends(require_donor),
+    user: TokenData = Depends(require_donor_role),
 ):
     donor_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not donor_doc:
@@ -353,7 +386,7 @@ async def create_donation(
 async def create_milestone(
     campaign_id: str,
     body: CreateMilestoneRequest,
-    user: TokenData = Depends(require_ngo),
+    user: TokenData = Depends(require_ngo_role),
 ):
     if not ObjectId.is_valid(campaign_id):
         raise HTTPException(status_code=400, detail="Invalid campaign ID")
@@ -384,7 +417,7 @@ async def submit_evidence(
     milestone_id: str,
     body: SubmitEvidenceRequest,
     background_tasks: BackgroundTasks,
-    user: TokenData = Depends(require_ngo),
+    user: TokenData = Depends(require_ngo_role),
 ):
     if not ObjectId.is_valid(milestone_id):
         raise HTTPException(status_code=400, detail="Invalid milestone ID")
@@ -421,7 +454,7 @@ class ReviewRequest(_BaseModel):
 async def review_milestone(
     milestone_id: str,
     body: ReviewRequest,
-    user: TokenData = Depends(require_verifier),
+    user: TokenData = Depends(require_verifier_role),
 ):
     if not ObjectId.is_valid(milestone_id):
         raise HTTPException(status_code=400, detail="Invalid milestone ID")
@@ -454,7 +487,7 @@ async def get_my_donations(user: TokenData = Depends(get_current_user)):
 # ─── Verification Queue ──────────────────────────────────────────────────────
 
 @app.get("/api/verification/queue")
-async def get_verification_queue(user: TokenData = Depends(require_verifier)):
+async def get_verification_queue(user: TokenData = Depends(require_verifier_role)):
     milestones = []
     async for doc in db.milestones.find({"status": "submitted"}):
         milestones.append(serialize(doc))
@@ -464,7 +497,7 @@ async def get_verification_queue(user: TokenData = Depends(require_verifier)):
 # ─── Analytics ───────────────────────────────────────────────────────────────
 
 @app.get("/api/analytics/ngo")
-async def ngo_analytics(user: TokenData = Depends(require_ngo)):
+async def ngo_analytics(user: TokenData = Depends(require_ngo_role)):
     ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not ngo_doc:
         raise HTTPException(status_code=404, detail="User not found")
