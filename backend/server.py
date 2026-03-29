@@ -861,10 +861,27 @@ async def sign_privy_transfer(
 
     try:
         executor = EscrowExecutor()
-        tx_b64 = executor._build_transfer_tx(
-            from_address=donor_wallet,
-            to_address=vault_address,
-            amount_sol=body.amount_sol,
+        # _build_transfer_tx performs blocking Solana RPC calls (sync client).
+        # Run it off the event loop so other API routes don't stall.
+        tx_b64 = await asyncio.wait_for(
+            asyncio.to_thread(
+                executor._build_transfer_tx,
+                from_address=donor_wallet,
+                to_address=vault_address,
+                amount_sol=body.amount_sol,
+            ),
+            timeout=12.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[PrivyTransfer] tx build timed out donor=%s vault=%s amount_sol=%.9f",
+            donor_wallet,
+            vault_address,
+            body.amount_sol,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="Timed out preparing transfer transaction",
         )
     except Exception as e:
         logger.exception(
