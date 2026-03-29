@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Users, Shield, Clock, Activity } from 'lucide-react'
+import { Users, Shield, Clock, Activity, ExternalLink, Check, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
+import { MetalButton } from '@/components/ui/metal-button'
 import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
-import { getCampaignById, getMilestones, getCampaignActivity } from '@/api/client'
+import { useAuth } from '@/contexts/AuthContext'
+import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer } from '@/api/client'
 import type { Campaign, Milestone } from '@/api/client'
 
 interface ActivityItem { id: string; type: string; message: string; time: string }
 
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useAuth()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [amount, setAmount] = useState('1')
   const [donating, setDonating] = useState(false)
   const [activity, setActivity] = useState<ActivityItem[]>([])
+
+  // Post-donation success state
+  const [txResult, setTxResult] = useState<{ signature: string; explorerUrl: string; amount: number } | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -29,12 +35,39 @@ export default function CampaignDetail() {
   }, [id])
 
   const handleDonate = async () => {
-    if (!campaign) return
+    if (!campaign || !id) return
+    const sol = parseFloat(amount)
+    if (isNaN(sol) || sol <= 0) {
+      toast.error('Enter a valid SOL amount')
+      return
+    }
+    if (!user?.wallet_address) {
+      toast.error('Your wallet is still being provisioned. Please wait a moment and try again.')
+      return
+    }
+
     setDonating(true)
-    // Wallet integration handled by backend — show placeholder toast
-    await new Promise(r => setTimeout(r, 600))
-    setDonating(false)
-    toast.success(`${amount} SOL donation initiated for "${campaign.title}"! Connect your wallet to complete.`)
+    setTxResult(null)
+    try {
+      const result = await donateTransfer({ campaign_id: id, amount_sol: sol })
+      setTxResult({
+        signature: result.solana_tx,
+        explorerUrl: result.explorer_url,
+        amount: sol,
+      })
+      // Update local campaign state
+      setCampaign(prev => prev ? {
+        ...prev,
+        total_raised_sol: prev.total_raised_sol + sol,
+        donors_count: (prev.donors_count ?? 0) + 1,
+      } : prev)
+      toast.success(`${sol} SOL donated successfully!`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Donation failed'
+      toast.error(msg)
+    } finally {
+      setDonating(false)
+    }
   }
 
   if (!campaign) {
@@ -48,6 +81,7 @@ export default function CampaignDetail() {
   const raised = campaign.total_raised_sol
   const goal = campaign.goal ?? 0
   const pct = goal > 0 ? Math.round((raised / goal) * 100) : 0
+  const isDonor = user?.role === 'donor'
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -105,49 +139,102 @@ export default function CampaignDetail() {
 
         {/* Right — Donate + Risk + Activity */}
         <div className="space-y-4 lg:sticky lg:top-6 self-start">
+          {/* Donation Card */}
           <GlassCard className="p-6">
-            {goal > 0 && (
-              <div className="mb-4">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-white/60">Progress</span>
-                  <span className="font-semibold text-white">{pct}%</span>
+            {/* Success state */}
+            {txResult ? (
+              <div className="text-center space-y-4">
+                <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
+                  <Check className="w-7 h-7 text-emerald-400" />
                 </div>
-                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700" style={{ width: `${Math.min(100, pct)}%` }} />
+                <div>
+                  <h3 className="text-lg font-bold text-white">Donation Successful!</h3>
+                  <p className="text-sm text-white/50 mt-1">{txResult.amount} SOL sent to escrow vault</p>
                 </div>
-                <div className="flex justify-between text-xs text-white/40 mt-2">
-                  <span>{raised.toFixed(2)} SOL raised</span>
-                  <span>of {goal} SOL</span>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-3">
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-semibold mb-1">Transaction</p>
+                  <p className="text-xs text-white/60 font-mono break-all">{txResult.signature}</p>
+                </div>
+                <a
+                  href={txResult.explorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-[oklch(0.65_0.25_25)] hover:text-white transition-colors"
+                >
+                  View on Solana Explorer <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <div className="pt-2">
+                  <MetalButton className="w-full" onClick={() => setTxResult(null)}>
+                    Make Another Donation
+                  </MetalButton>
                 </div>
               </div>
+            ) : (
+              <>
+                {goal > 0 && (
+                  <div className="mb-4">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-white/60">Progress</span>
+                      <span className="font-semibold text-white">{pct}%</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700" style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs text-white/40 mt-2">
+                      <span>{raised.toFixed(2)} SOL raised</span>
+                      <span>of {goal} SOL</span>
+                    </div>
+                  </div>
+                )}
+
+                {isDonor ? (
+                  <>
+                    <div className="mb-4">
+                      <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Amount (SOL)</label>
+                      <input
+                        type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0.01" step="0.1"
+                        className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+                      />
+                      <div className="flex gap-2 mt-2">
+                        {['0.1', '0.5', '1', '5'].map(v => (
+                          <button key={v} onClick={() => setAmount(v)}
+                            className="flex-1 text-xs py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/50 hover:bg-white/[0.08] hover:text-white transition-all">
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {!user?.wallet_address && (
+                      <div className="flex items-start gap-2 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-amber-300/80">Your wallet is being provisioned. This may take a moment.</p>
+                      </div>
+                    )}
+
+                    <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !user?.wallet_address}>
+                      {donating ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Sending Transaction...
+                        </div>
+                      ) : (
+                        'DONATE NOW'
+                      )}
+                    </LiquidButton>
+
+                    <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-white/40">
+                      <Shield className="w-3 h-3" />
+                      Solana escrow · Auto-refund on failure
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-white/50">Sign in as a donor to contribute to this campaign.</p>
+                  </div>
+                )}
+              </>
             )}
-
-            <div className="mb-4">
-              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Amount (SOL)</label>
-              <div className="relative">
-                <input
-                  type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0.01" step="0.1"
-                  className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
-                />
-              </div>
-              <div className="flex gap-2 mt-2">
-                {['0.1', '0.5', '1', '5'].map(v => (
-                  <button key={v} onClick={() => setAmount(v)}
-                    className="flex-1 text-xs py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/50 hover:bg-white/[0.08] hover:text-white transition-all">
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <LiquidButton className="w-full" onClick={handleDonate} disabled={donating}>
-              {donating ? 'Connecting Wallet...' : 'DONATE NOW'}
-            </LiquidButton>
-
-            <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-white/40">
-              <Shield className="w-3 h-3" />
-              Solana escrow · Auto-refund on failure
-            </div>
           </GlassCard>
 
           <GlassCard className="p-5">

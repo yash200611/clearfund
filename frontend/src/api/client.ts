@@ -173,6 +173,20 @@ export async function makeDonation(data: {
   });
 }
 
+export interface DonateTransferResult extends Donation {
+  explorer_url: string;
+}
+
+export async function donateTransfer(data: {
+  campaign_id: string;
+  amount_sol: number;
+}): Promise<DonateTransferResult> {
+  return apiFetch<DonateTransferResult>('/api/donations/transfer', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function getMyDonations(): Promise<Donation[]> {
   return apiFetch<Donation[]>('/api/donations/mine');
 }
