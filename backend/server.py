@@ -23,6 +23,7 @@ from auth import (
     get_current_user,
     get_jwks,
 )
+from agents.campaign_review_agent import run_campaign_review_agent
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
 from analytics.lava_client import LavaClient
@@ -237,6 +238,98 @@ def serialize(doc: dict) -> dict:
     return doc
 
 
+def _optional_user_from_request(request: Request) -> Optional[TokenData]:
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        return TokenData(
+            sub=payload.get("sub", ""),
+            email=payload.get("email", ""),
+            role=payload.get("https://clearfund.app/role"),
+        )
+    except HTTPException as e:
+        logger.warning("[Campaigns] optional auth ignored status=%s detail=%s", e.status_code, e.detail)
+        return None
+    except Exception as e:
+        logger.warning("[Campaigns] optional auth ignored error=%s", str(e))
+        return None
+
+
+async def _run_campaign_intake_review(campaign_id: str) -> None:
+    """
+    Background task: send campaign to Gemini, then update status.
+    - approve    -> active
+    - reject     -> rejected
+    - needs_info -> under_review
+    """
+    try:
+        if not ObjectId.is_valid(campaign_id):
+            logger.warning("[CampaignReview] invalid campaign_id=%s", campaign_id)
+            return
+
+        campaign_doc = await db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        if not campaign_doc:
+            logger.warning("[CampaignReview] campaign not found id=%s", campaign_id)
+            return
+
+        campaign = serialize(dict(campaign_doc))
+        logger.info("[CampaignReview] started campaign_id=%s title=%s", campaign_id, campaign.get("title"))
+        result = await run_campaign_review_agent(campaign)
+
+        recommendation = str(result.get("recommendation", "needs_info"))
+        new_status = "under_review"
+        if recommendation == "approve":
+            new_status = "active"
+        elif recommendation == "reject":
+            new_status = "rejected"
+
+        trust_score = int(result.get("trust_score", campaign.get("trust_score", 0) or 0))
+        trust_score = max(0, min(100, trust_score))
+
+        review_update = {
+            "status": new_status,
+            "trust_score": trust_score,
+            "campaign_review": {
+                "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-pro"),
+                "recommendation": recommendation,
+                "confidence_score": int(result.get("confidence_score", 0)),
+                "reasoning": str(result.get("reasoning", "")),
+                "risk_flags": result.get("risk_flags", []),
+                "reviewed_at": datetime.now(timezone.utc),
+            },
+        }
+
+        await db.campaigns.update_one({"_id": ObjectId(campaign_id)}, {"$set": review_update})
+        logger.info(
+            "[CampaignReview] complete campaign_id=%s recommendation=%s status=%s trust_score=%s",
+            campaign_id,
+            recommendation,
+            new_status,
+            trust_score,
+        )
+
+        await db.agent_audit_logs.insert_one({
+            "campaign_id": campaign_id,
+            "milestone_id": None,
+            "event_type": "campaign_review_completed",
+            "payload": {
+                "recommendation": recommendation,
+                "status": new_status,
+                "confidence_score": int(result.get("confidence_score", 0)),
+                "reasoning": str(result.get("reasoning", "")),
+                "risk_flags": result.get("risk_flags", []),
+            },
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.exception("[CampaignReview] failed campaign_id=%s error=%s", campaign_id, str(e))
+
+
 def _solana_explorer_url(signature: str) -> str:
     return f"{EXPLORER_BASE}/{signature}?cluster={SOLANA_NETWORK}"
 
@@ -395,8 +488,22 @@ async def get_me(user: TokenData = Depends(get_current_user)):
 # ─── Campaigns ───────────────────────────────────────────────────────────────
 
 @app.get("/api/campaigns")
-async def list_campaigns():
-    cursor = db.campaigns.find({"status": "active"})
+async def list_campaigns(request: Request):
+    viewer = _optional_user_from_request(request)
+    query = {"status": "active"}
+
+    if viewer:
+        viewer_doc = await db.users.find_one({"auth0_sub": viewer.sub}, {"role": 1})
+        viewer_role = (viewer_doc or {}).get("role") or viewer.role
+        if viewer_role == "ngo":
+            ngo_doc = await db.users.find_one({"auth0_sub": viewer.sub}, {"_id": 1})
+            if ngo_doc:
+                ngo_id = str(ngo_doc["_id"])
+                # NGO can see all of their own campaigns (including under_review/rejected),
+                # plus globally active campaigns.
+                query = {"$or": [{"status": "active"}, {"ngo_id": ngo_id}]}
+
+    cursor = db.campaigns.find(query).sort("created_at", -1)
     campaigns = []
     async for doc in cursor:
         campaigns.append(serialize(doc))
@@ -406,6 +513,7 @@ async def list_campaigns():
 @app.post("/api/campaigns", status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     body: CreateCampaignRequest,
+    background_tasks: BackgroundTasks,
     user: TokenData = Depends(require_ngo_role),
 ):
     ngo_doc = await db.users.find_one({"auth0_sub": user.sub})
@@ -414,18 +522,31 @@ async def create_campaign(
 
     campaign = {
         "ngo_id": str(ngo_doc["_id"]),
+        "ngo_name": ngo_doc.get("name") or ngo_doc.get("email") or "NGO",
         "title": body.title,
         "description": body.description,
         "category": body.category,
         "total_raised_sol": 0.0,
         "vault_address": body.vault_address,
-        "status": "draft",
+        "status": "under_review",
         "trust_score": 0.0,
         "failure_count": 0,
+        "campaign_review": {
+            "recommendation": "pending",
+            "confidence_score": 0,
+            "reasoning": "Queued for Gemini intake review",
+            "risk_flags": [],
+            "reviewed_at": None,
+        },
         "created_at": datetime.now(timezone.utc),
     }
     result = await db.campaigns.insert_one(campaign)
-    campaign["_id"] = str(result.inserted_id)
+    campaign_id = str(result.inserted_id)
+    campaign["_id"] = campaign_id
+
+    logger.info("[CampaignReview] queued campaign_id=%s title=%s", campaign_id, campaign.get("title"))
+    background_tasks.add_task(_run_campaign_intake_review, campaign_id)
+
     return campaign
 
 

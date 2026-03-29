@@ -8,16 +8,24 @@ import { CampaignCard } from '@/components/CampaignCard'
 import { getCampaigns, createCampaign } from '@/api/client'
 import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 
 const TABS = ['My Campaigns', 'New Campaign']
 
 export default function NGOStudio() {
+  const { user } = useAuth()
   const [tab, setTab] = useState(0)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare', vault_address: '' })
 
-  useEffect(() => { getCampaigns().then(setCampaigns).catch(() => {}) }, [])
+  const loadMyCampaigns = () => {
+    getCampaigns()
+      .then((data) => setCampaigns(data.filter((c) => c.ngo_id === user?.id)))
+      .catch(() => {})
+  }
+
+  useEffect(() => { loadMyCampaigns() }, [user?.id])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -32,7 +40,7 @@ export default function NGOStudio() {
       toast.success('Campaign launched! It will go live after review.')
       setForm({ title: '', description: '', category: 'Healthcare', vault_address: '' })
       setTab(0)
-      getCampaigns().then(setCampaigns).catch(() => {})
+      loadMyCampaigns()
     } catch (err) {
       toast.error('Failed to create campaign. Please try again.')
     } finally {

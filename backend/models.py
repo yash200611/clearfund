@@ -26,7 +26,9 @@ class Role(str, Enum):
 
 class CampaignStatus(str, Enum):
     draft = "draft"
+    under_review = "under_review"
     active = "active"
+    rejected = "rejected"
     completed = "completed"
     failed = "failed"
 

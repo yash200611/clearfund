@@ -7,6 +7,8 @@ interface StatusBadgeProps {
 
 const STATUS_CONFIG: Record<string, { dot: string; text: string; bg: string; border: string }> = {
   active: { dot: 'bg-emerald-400', text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
+  under_review: { dot: 'bg-amber-400 animate-pulse', text: 'text-amber-300', bg: 'bg-amber-400/10', border: 'border-amber-400/30' },
+  draft: { dot: 'bg-white/40', text: 'text-white/60', bg: 'bg-white/5', border: 'border-white/10' },
   locked: { dot: 'bg-white/40', text: 'text-white/60', bg: 'bg-white/5', border: 'border-white/10' },
   submitted: { dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20' },
   approved: { dot: 'bg-emerald-400', text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
