@@ -164,7 +164,7 @@ export default function Landing() {
         }`}
       >
         <div className="flex items-center gap-2.5">
-          <Shield className="w-5 h-5 text-[oklch(0.65_0.25_25)]" />
+          <img src="/favicon.ico" alt="Aidex" className="w-5 h-5" />
           <span className="font-bold text-white text-lg">Aidex</span>
         </div>
         <div className="flex items-center gap-3">
@@ -285,7 +285,7 @@ export default function Landing() {
         <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-3 gap-8">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Shield className="w-4 h-4 text-[oklch(0.65_0.25_25)]" />
+              <img src="/favicon.ico" alt="Aidex" className="w-4 h-4" />
               <span className="font-bold text-white text-sm">Aidex</span>
             </div>
             <p className="text-sm text-white/30">Transparent, milestone-based escrow for the social sector.</p>
