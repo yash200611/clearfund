@@ -1,44 +1,47 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Users, Shield, Clock, Activity, ExternalLink, Check, AlertTriangle } from 'lucide-react'
+import { Activity, AlertTriangle, Check, ExternalLink, Shield } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
-import { MetalButton } from '@/components/ui/metal-button'
+import { StatusBadge } from '@/components/StatusBadge'
 import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
-import { StatusBadge } from '@/components/StatusBadge'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { useAuth } from '@/contexts/AuthContext'
 import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer, signPrivyTransfer } from '@/api/client'
 import type { Campaign, Milestone } from '@/api/client'
 import { transferSolToVault } from '@/lib/solanaTransfer'
 
-interface ActivityItem { id: string; type: string; message: string; time: string }
+interface ActivityItem {
+  id: string
+  type: string
+  message: string
+  time: string
+}
 
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [milestones, setMilestones] = useState<Milestone[]>([])
+  const [activity, setActivity] = useState<ActivityItem[]>([])
   const [amount, setAmount] = useState('1')
   const [donating, setDonating] = useState(false)
-  const [activity, setActivity] = useState<ActivityItem[]>([])
-
-  // Post-donation success state
   const [txResult, setTxResult] = useState<{ signature: string; explorerUrl: string; amount: number } | null>(null)
 
   useEffect(() => {
     if (!id) return
     getCampaignById(id).then(setCampaign).catch(() => {})
     getMilestones(id).then(setMilestones).catch(() => {})
-    getCampaignActivity(id).then(items => setActivity(items as ActivityItem[])).catch(() => {})
+    getCampaignActivity(id).then((items) => setActivity(items as ActivityItem[])).catch(() => {})
   }, [id])
 
   const handleDonate = async () => {
     if (!campaign || !id) return
+
     const sol = parseFloat(amount)
-    if (isNaN(sol) || sol <= 0) {
+    if (!Number.isFinite(sol) || sol <= 0) {
       toast.error('Enter a valid SOL amount')
       return
     }
@@ -84,16 +87,18 @@ export default function CampaignDetail() {
         explorerUrl: result.explorer_url ?? txExplorerUrl,
         amount: sol,
       })
-      // Update local campaign state
-      setCampaign(prev => prev ? {
-        ...prev,
-        total_raised_sol: prev.total_raised_sol + sol,
-        donors_count: (prev.donors_count ?? 0) + 1,
-      } : prev)
-      toast.success(`${sol} SOL donated successfully!`)
+      setCampaign((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_raised_sol: prev.total_raised_sol + sol,
+              donors_count: (prev.donors_count ?? 0) + 1,
+            }
+          : prev,
+      )
+      toast.success(`${sol} SOL donated successfully`)
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Donation failed'
-      toast.error(msg)
+      toast.error(e instanceof Error ? e.message : 'Donation failed')
     } finally {
       setDonating(false)
     }
@@ -101,8 +106,8 @@ export default function CampaignDetail() {
 
   if (!campaign) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="h-64 rounded-2xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+      <div className="cf-page max-w-6xl">
+        <div className="h-64 rounded-3xl border border-white/[0.12] bg-white/[0.03] animate-pulse" />
       </div>
     )
   }
@@ -113,131 +118,108 @@ export default function CampaignDetail() {
   const isDonor = user?.role === 'donor'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Hero */}
-      <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden">
+    <div className="cf-page max-w-6xl space-y-6 pb-10">
+      <div className="cf-animate-in relative h-72 md:h-80 rounded-[2rem] overflow-hidden border border-white/[0.12]">
         {campaign.image ? (
           <img src={campaign.image} alt={campaign.title} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full bg-white/[0.04] flex items-center justify-center">
-            <span className="text-6xl font-black text-white/10">{campaign.category?.[0]}</span>
+          <div className="w-full h-full bg-[linear-gradient(145deg,rgba(255,109,62,0.35),rgba(255,255,255,0.04),rgba(56,189,248,0.2))] flex items-center justify-center">
+            <span className="cf-display text-7xl text-white/55">{campaign.category?.[0]}</span>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-transparent" />
         <div className="absolute bottom-6 left-6 right-6">
           <div className="flex flex-wrap gap-2 mb-3">
             <StatusBadge status={campaign.status} />
             <TrustBadge score={campaign.trust_score} />
             <RiskBadge failureCount={campaign.failure_count} />
           </div>
-          <h1 className="text-2xl md:text-3xl font-black text-white">{campaign.title}</h1>
-          <p className="text-white/60 text-sm mt-1">by {campaign.ngo_name} · {campaign.category}</p>
+          <h1 className="cf-display text-4xl md:text-5xl text-white leading-[1.02]">{campaign.title}</h1>
+          <p className="text-white/65 text-sm mt-2">
+            by {campaign.ngo_name} · {campaign.category}
+          </p>
         </div>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Goal', value: goal > 0 ? `${goal} SOL` : '—' },
+          { label: 'Goal', value: goal > 0 ? `${goal} SOL` : 'Open' },
           { label: 'Raised', value: `${raised.toFixed(2)} SOL` },
-          { label: 'Milestones', value: String(milestones.length) },
-          { label: 'Donors', value: campaign.donors_count != null ? String(campaign.donors_count) : '—' },
-        ].map(({ label, value }) => (
-          <GlassCard key={label} className="p-4 text-center">
-            <p className="text-xl font-black text-white tabular-nums">{value}</p>
-            <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mt-0.5">{label}</p>
+          { label: 'Milestones', value: `${milestones.length}` },
+          { label: 'Donors', value: campaign.donors_count != null ? `${campaign.donors_count}` : '—' },
+        ].map((card, i) => (
+          <GlassCard key={card.label} className="p-4 text-center cf-animate-in" style={{ animationDelay: `${90 + i * 60}ms` }}>
+            <p className="cf-display text-2xl text-white">{card.value}</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-white/42 mt-1">{card.label}</p>
           </GlassCard>
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left — Description + Milestones */}
-        <div className="lg:col-span-2 space-y-6">
-          <GlassCard className="p-6">
-            <h2 className="text-lg font-semibold text-white mb-3">About this Campaign</h2>
-            <p className="text-sm text-white/60 leading-relaxed">{campaign.description}</p>
+      <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-4">
+        <div className="space-y-4">
+          <GlassCard className="p-6 cf-animate-in cf-stagger-2">
+            <h2 className="cf-section-title text-2xl text-white mb-3">Campaign Narrative</h2>
+            <p className="text-sm text-white/62 leading-relaxed">{campaign.description}</p>
           </GlassCard>
 
           {milestones.length > 0 && (
-            <GlassCard className="p-6">
-              <h2 className="text-lg font-semibold text-white mb-6">Milestone Roadmap</h2>
+            <GlassCard className="p-6 cf-animate-in cf-stagger-3">
+              <h2 className="cf-section-title text-2xl text-white mb-6">Milestone Roadmap</h2>
               <MilestoneTimeline milestones={milestones} />
             </GlassCard>
           )}
         </div>
 
-        {/* Right — Donate + Risk + Activity */}
-        <div className="space-y-4 lg:sticky lg:top-6 self-start">
-          {/* Donation Card */}
-          <GlassCard className="p-6">
-            {/* Success state */}
+        <div className="space-y-4">
+          <GlassCard className="p-6 cf-animate-in cf-stagger-2">
             {txResult ? (
               <div className="text-center space-y-4">
-                <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
-                  <Check className="w-7 h-7 text-emerald-400" />
+                <div className="w-14 h-14 rounded-full bg-emerald-500/18 flex items-center justify-center mx-auto">
+                  <Check className="w-7 h-7 text-emerald-300" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">Donation Successful!</h3>
-                  <p className="text-sm text-white/50 mt-1">{txResult.amount} SOL sent to escrow vault</p>
+                <h3 className="cf-section-title text-2xl text-white">Donation Successful</h3>
+                <p className="text-sm text-white/58">{txResult.amount} SOL transferred to escrow vault.</p>
+                <div className="rounded-xl border border-white/[0.12] bg-white/[0.04] p-3 text-left">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-white/35 mb-1">Transaction Signature</p>
+                  <p className="text-xs text-white/70 font-mono break-all">{txResult.signature}</p>
                 </div>
-                <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-3">
-                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-semibold mb-1">Transaction</p>
-                  <p className="text-xs text-white/60 font-mono break-all">{txResult.signature}</p>
-                </div>
-                <a
-                  href={txResult.explorerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-[oklch(0.65_0.25_25)] hover:text-white transition-colors"
-                >
-                  View on Solana Explorer <ExternalLink className="w-3.5 h-3.5" />
+                <a href={txResult.explorerUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-[oklch(0.65_0.25_25)] hover:text-white">
+                  View in Explorer <ExternalLink className="w-3.5 h-3.5" />
                 </a>
-                <div className="pt-2">
-                  <MetalButton className="w-full" onClick={() => setTxResult(null)}>
-                    Make Another Donation
-                  </MetalButton>
-                </div>
               </div>
             ) : (
               <>
                 {goal > 0 && (
-                  <div className="mb-4">
+                  <div className="mb-5">
                     <div className="flex justify-between text-sm mb-2">
-                      <span className="text-white/60">Progress</span>
-                      <span className="font-semibold text-white">{pct}%</span>
+                      <span className="text-white/58">Funding Progress</span>
+                      <span className="text-white">{pct}%</span>
                     </div>
-                    <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
-                      <div className="h-full bg-[oklch(0.65_0.25_25)] rounded-full transition-all duration-700" style={{ width: `${Math.min(100, pct)}%` }} />
+                    <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
+                      <div className="h-full rounded-full bg-[linear-gradient(90deg,rgba(255,109,62,0.96),rgba(56,189,248,0.82))]" style={{ width: `${Math.min(100, pct)}%` }} />
                     </div>
-                    <div className="flex justify-between text-xs text-white/40 mt-2">
-                      <span>{raised.toFixed(2)} SOL raised</span>
-                      <span>of {goal} SOL</span>
+                    <div className="text-xs text-white/44 mt-2">
+                      {raised.toFixed(2)} SOL of {goal} SOL
                     </div>
                   </div>
                 )}
 
                 {isDonor ? (
                   <>
-                    <div className="mb-4">
-                      <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Amount (SOL)</label>
-                      <input
-                        type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0.01" step="0.1"
-                        className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
-                      />
-                      <div className="flex gap-2 mt-2">
-                        {['0.1', '0.5', '1', '5'].map(v => (
-                          <button key={v} onClick={() => setAmount(v)}
-                            className="flex-1 text-xs py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/50 hover:bg-white/[0.08] hover:text-white transition-all">
-                            {v}
-                          </button>
-                        ))}
-                      </div>
+                    <label className="text-xs uppercase tracking-[0.14em] text-white/45 mb-2 block">Amount (SOL)</label>
+                    <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min="0.01" step="0.1" className="cf-soft-input" />
+                    <div className="grid grid-cols-4 gap-2 mt-2">
+                      {['0.1', '0.5', '1', '5'].map((preset) => (
+                        <button key={preset} onClick={() => setAmount(preset)} className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] text-xs text-white/70 hover:bg-white/[0.08] hover:text-white transition-all">
+                          {preset}
+                        </button>
+                      ))}
                     </div>
 
                     {!campaign.vault_address && (
-                      <div className="flex items-start gap-2 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-amber-300/80">This campaign is missing a vault address. Donation is disabled.</p>
+                      <div className="flex items-start gap-2 mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25">
+                        <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-amber-200/85">This campaign has no vault address configured. Donations are disabled.</p>
                       </div>
                     )}
                     {campaign.status !== 'active' && (
@@ -247,77 +229,52 @@ export default function CampaignDetail() {
                       </div>
                     )}
 
-                    <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !campaign.vault_address || campaign.status !== 'active'}>
-                      {donating ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Sending Transaction...
-                        </div>
-                      ) : (
-                        'DONATE NOW'
-                      )}
-                    </LiquidButton>
-
-                    <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-white/40">
-                      <Shield className="w-3 h-3" />
-                      Solana escrow · Auto-refund on failure
+                    <div className="mt-4">
+                      <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !campaign.vault_address || campaign.status !== 'active'}>
+                        {donating ? 'Processing transaction...' : 'Donate to Escrow'}
+                      </LiquidButton>
                     </div>
+                    <p className="text-xs text-white/42 mt-3 flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" />
+                      Auto-refund if milestones fail verification.
+                    </p>
                   </>
                 ) : (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-white/50">Sign in as a donor to contribute to this campaign.</p>
-                  </div>
+                  <p className="text-sm text-white/55">Sign in as a donor to contribute to this campaign.</p>
                 )}
               </>
             )}
           </GlassCard>
 
-          <GlassCard className="p-5">
-            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-white/50" />
-              Risk Assessment
-            </h3>
-            <div className="space-y-2 text-xs text-white/50">
+          <GlassCard className="p-5 cf-animate-in cf-stagger-3">
+            <h3 className="cf-section-title text-xl text-white mb-3">Risk Brief</h3>
+            <div className="space-y-2 text-xs text-white/56">
               <div className="flex justify-between">
                 <span>Trust Score</span>
-                <span className="text-white font-semibold">{campaign.trust_score}%</span>
+                <span className="text-white">{campaign.trust_score}%</span>
               </div>
               <div className="flex justify-between">
-                <span>Milestone Failures</span>
-                <span className={campaign.failure_count > 0 ? 'text-amber-400 font-semibold' : 'text-white font-semibold'}>
-                  {campaign.failure_count}/3
-                </span>
+                <span>Failure Count</span>
+                <span className="text-white">{campaign.failure_count}/3</span>
               </div>
               <div className="flex justify-between">
-                <span>Since</span>
-                <span className="text-white font-semibold">{campaign.created_at?.slice(0, 10)}</span>
+                <span>Created</span>
+                <span className="text-white">{campaign.created_at?.slice(0, 10)}</span>
               </div>
-              {campaign.donors_count != null && (
-                <div className="flex justify-between">
-                  <span>Total Donors</span>
-                  <span className="text-white font-semibold">{campaign.donors_count}</span>
-                </div>
-              )}
             </div>
           </GlassCard>
 
           {activity.length > 0 && (
-            <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-white/50" />
+            <GlassCard className="p-5 cf-animate-in cf-stagger-4">
+              <h3 className="cf-section-title text-xl text-white mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-white/70" />
                 Recent Activity
               </h3>
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {activity.slice(0, 4).map((a, i) => (
-                  <div key={a.id ?? i} className="flex items-start gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-[oklch(0.65_0.25_25)] mt-1.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-white/70">{a.message}</p>
-                      <p className="text-[10px] text-white/30 mt-0.5 flex items-center gap-1">
-                        <Clock className="w-2.5 h-2.5" />
-                        {a.time}
-                      </p>
-                    </div>
+                  <div key={a.id ?? i} className="rounded-xl border border-white/[0.1] bg-white/[0.03] px-3 py-2.5">
+                    <p className="text-sm text-white/78">{a.message}</p>
+                    <p className="text-[11px] text-white/42 mt-1">{a.time}</p>
                   </div>
                 ))}
               </div>

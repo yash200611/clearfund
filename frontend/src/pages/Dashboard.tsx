@@ -1,14 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  DollarSign, TrendingUp, Shield, Users,
-  ChevronRight, Briefcase, Heart, Plus, Wallet,
-  BarChart3, Clock, ExternalLink, X
+  ArrowUpRight,
+  BarChart3,
+  Briefcase,
+  ChevronRight,
+  DollarSign,
+  ExternalLink,
+  Heart,
+  Plus,
+  Shield,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Users,
+  Wallet,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
-import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
 import { useAuth } from '@/contexts/AuthContext'
 import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics, signPrivyTransfer } from '@/api/client'
@@ -32,34 +43,43 @@ export default function Dashboard() {
   useEffect(() => {
     getCampaigns().then(setCampaigns).catch(() => {})
     if (isDonor) getMyDonations().then(setDonations).catch(() => {})
-    getPlatformAnalytics().then(s => setStats(s as Record<string, unknown>)).catch(() => {})
+    getPlatformAnalytics().then((s) => setStats(s as Record<string, unknown>)).catch(() => {})
   }, [isDonor])
 
   const totalDonated = donations.reduce((s, d) => s + d.amount_sol, 0)
   const totalReleased = donations.reduce((s, d) => s + d.released_sol, 0)
   const totalLocked = donations.reduce((s, d) => s + d.locked_sol, 0)
-
+  const myCampaigns = campaigns.filter((c) => c.ngo_id === user?.id)
+  const featuredCampaigns = campaigns.slice(0, 6)
   const greeting = new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'
 
-  const donorStats = [
-    { icon: DollarSign, label: 'Total Donated', value: `${totalDonated.toFixed(2)} SOL`, sub: 'Lifetime giving' },
-    { icon: TrendingUp, label: 'Released to NGOs', value: `${totalReleased.toFixed(2)} SOL`, sub: 'Impact delivered' },
-    { icon: Shield, label: 'In Escrow', value: `${totalLocked.toFixed(2)} SOL`, sub: 'Protected funds' },
-    { icon: Users, label: 'Campaigns Backed', value: String(donations.length), sub: 'Supported projects' },
-  ]
-
-  const ngoStats = [
-    { icon: Briefcase, label: 'My Campaigns', value: String(campaigns.filter(c => c.ngo_id === user?.id).length), sub: 'Active projects' },
-    { icon: DollarSign, label: 'Total Raised', value: `${campaigns.filter(c => c.ngo_id === user?.id).reduce((s, c) => s + c.total_raised_sol, 0).toFixed(2)} SOL`, sub: 'Across all campaigns' },
-    { icon: TrendingUp, label: 'Success Rate', value: (stats?.success_rate as string) ?? '—', sub: 'Milestones verified' },
-    { icon: Users, label: 'Total Donors', value: String(stats?.total_donors ?? '—'), sub: 'Global community' },
-  ]
-
-  const statCards = isDonor ? donorStats : ngoStats
-
-  // NGO sees their own campaigns, donor sees all featured
-  const myCampaigns = isNGO ? campaigns.filter(c => c.ngo_id === user?.id) : []
-  const featuredCampaigns = campaigns.slice(0, 3)
+  const kpis = useMemo(
+    () =>
+      isDonor
+        ? [
+            { icon: Wallet, label: 'Capital Deployed', value: `${totalDonated.toFixed(2)} SOL`, hint: 'Lifetime contributions' },
+            { icon: TrendingUp, label: 'Verified Impact', value: `${totalReleased.toFixed(2)} SOL`, hint: 'Released after milestones' },
+            { icon: Shield, label: 'Escrow Reserve', value: `${totalLocked.toFixed(2)} SOL`, hint: 'Protected in vaults' },
+            { icon: Target, label: 'Campaign Bets', value: `${donations.length}`, hint: 'Projects backed' },
+          ]
+        : [
+            { icon: Briefcase, label: 'Campaigns Live', value: `${myCampaigns.length}`, hint: 'Active mission threads' },
+            {
+              icon: DollarSign,
+              label: 'Gross Raised',
+              value: `${myCampaigns.reduce((s, c) => s + c.total_raised_sol, 0).toFixed(2)} SOL`,
+              hint: 'Across all campaigns',
+            },
+            {
+              icon: TrendingUp,
+              label: 'Verification Success',
+              value: `${stats?.success_rate ?? '—'}`,
+              hint: 'Platform-level approval trend',
+            },
+            { icon: Users, label: 'Donor Reach', value: `${stats?.total_donors ?? '—'}`, hint: 'Global capital network' },
+          ],
+    [donations.length, isDonor, myCampaigns, stats, totalDonated, totalLocked, totalReleased],
+  )
 
   const openInvest = (campaign: Campaign) => {
     setSelectedCampaign(campaign)
@@ -114,214 +134,215 @@ export default function Dashboard() {
         wallet_address: txWalletAddress,
       })
 
-      setCampaigns(prev => prev.map(c => (
-        c._id === selectedCampaign._id
-          ? { ...c, total_raised_sol: c.total_raised_sol + amountSol, donors_count: (c.donors_count ?? 0) + 1 }
-          : c
-      )))
-      setDonations(prev => [donation, ...prev])
+      setCampaigns((prev) =>
+        prev.map((c) =>
+          c._id === selectedCampaign._id
+            ? { ...c, total_raised_sol: c.total_raised_sol + amountSol, donors_count: (c.donors_count ?? 0) + 1 }
+            : c,
+        ),
+      )
+      setDonations((prev) => [donation, ...prev])
       setInvestResult({
         signature: donation.tx_signature ?? donation.solana_tx,
         explorerUrl: donation.explorer_url ?? txExplorerUrl,
       })
-      toast.success(`${amountSol} SOL sent to campaign vault`)
+      toast.success(`${amountSol} SOL transferred to vault`)
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Transfer failed'
-      toast.error(msg)
+      toast.error(e instanceof Error ? e.message : 'Transfer failed')
     } finally {
       setInvesting(false)
     }
   }
 
   return (
-    <div className="p-6 space-y-10 max-w-7xl mx-auto">
-      {/* ── Hero greeting ── */}
-      <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-[24px] p-8 md:p-10">
-        <div className="absolute top-0 right-0 w-[400px] h-[400px] rounded-full bg-[oklch(0.65_0.25_25)]/[0.03] blur-3xl pointer-events-none" />
-        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div>
-            <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/40 bg-white/[0.04] border border-white/[0.08] px-3 py-1.5 rounded-full mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-[oklch(0.65_0.25_25)] animate-pulse" />
-              {isNGO ? 'NGO Dashboard' : 'Donor Dashboard'}
-            </div>
-            <h1 className="text-3xl md:text-4xl font-black text-white leading-tight mb-2">
-              Good {greeting}, {user?.name?.split(' ')[0]}
-            </h1>
-            <p className="text-base text-white/50 max-w-lg">
-              {isNGO
-                ? 'Manage your campaigns, track milestones, and see your impact grow in real time.'
-                : "Here's what's happening with your donations and the campaigns you support."}
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
+    <div className="cf-page space-y-8 pb-9">
+      <section className="cf-animate-in grid xl:grid-cols-[1.3fr_0.7fr] gap-4">
+        <GlassCard glow className="p-7 md:p-9 relative overflow-hidden">
+          <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-cyan-400/20 blur-3xl pointer-events-none" />
+          <p className="inline-flex items-center gap-2 cf-chip px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-white/80 font-semibold">
+            <Sparkles className="w-3.5 h-3.5 text-[oklch(0.65_0.25_25)]" />
+            {isDonor ? 'Donor Command Center' : 'NGO Command Center'}
+          </p>
+          <h2 className="cf-display text-4xl md:text-5xl text-white mt-4 leading-[1.02]">
+            Good {greeting}, {user?.name?.split(' ')[0]}
+          </h2>
+          <p className="text-white/62 mt-4 max-w-xl text-[15px] leading-relaxed">
+            {isDonor
+              ? 'Track every SOL across escrow, review active opportunities, and deploy capital with milestone confidence.'
+              : 'Operate campaigns like a modern fundraising studio with instant visibility into capital, milestones, and reach.'}
+          </p>
+          <div className="mt-7 flex flex-col sm:flex-row gap-3">
             {isNGO ? (
               <LiquidButton size="xl" onClick={() => navigate('/ngo-studio')}>
                 <Plus className="w-4 h-4" />
-                CREATE CAMPAIGN
+                Launch Campaign
               </LiquidButton>
             ) : (
               <LiquidButton size="xl" onClick={() => navigate('/campaigns')}>
                 <Heart className="w-4 h-4" />
-                FUND A CAMPAIGN
+                Fund a Campaign
               </LiquidButton>
             )}
-            <MetalButton onClick={() => navigate(isNGO ? '/analytics' : '/my-donations')}>
-              {isNGO ? (
-                <><BarChart3 className="w-4 h-4 mr-2" /> Analytics</>
-              ) : (
-                <><Wallet className="w-4 h-4 mr-2" /> My Donations</>
-              )}
-            </MetalButton>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Stat cards ── */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-4">Overview</p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {statCards.map(({ icon: Icon, label, value, sub }) => (
-            <GlassCard key={label} className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold uppercase tracking-widest text-white/40">{label}</p>
-                <div className="w-8 h-8 rounded-xl bg-white/[0.06] flex items-center justify-center">
-                  <Icon className="w-4 h-4 text-white/50" />
-                </div>
-              </div>
-              <p className="text-2xl font-black text-white tabular-nums">{value}</p>
-              <p className="text-xs text-white/40 mt-1">{sub}</p>
-            </GlassCard>
-          ))}
-        </div>
-      </div>
-
-      {/* ── NGO: My Campaigns section ── */}
-      {isNGO && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">Your Projects</p>
-              <h2 className="text-2xl font-bold text-white">My Campaigns</h2>
-            </div>
             <button
-              onClick={() => navigate('/ngo-studio')}
-              className="flex items-center gap-1 text-sm text-white/50 hover:text-white transition-colors"
+              onClick={() => navigate(isNGO ? '/analytics' : '/my-donations')}
+              className="h-12 px-6 rounded-xl border border-white/[0.16] bg-white/[0.05] hover:bg-white/[0.09] text-white text-sm font-semibold flex items-center gap-2 transition-all"
             >
-              Manage all <ChevronRight className="w-4 h-4" />
+              {isNGO ? <BarChart3 className="w-4 h-4" /> : <Wallet className="w-4 h-4" />}
+              {isNGO ? 'View Intelligence' : 'Open Donation Ledger'}
             </button>
           </div>
-          {myCampaigns.length > 0 ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {myCampaigns.slice(0, 3).map(c => <CampaignCard key={c._id} campaign={c} />)}
-            </div>
-          ) : (
-            <GlassCard className="p-10 text-center">
-              <Briefcase className="w-10 h-10 text-white/20 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-white mb-2">No campaigns yet</h3>
-              <p className="text-sm text-white/40 mb-6 max-w-md mx-auto">
-                Create your first campaign to start receiving milestone-based funding from donors worldwide.
-              </p>
-              <LiquidButton size="lg" onClick={() => navigate('/ngo-studio')}>
-                <Plus className="w-4 h-4" />
-                CREATE YOUR FIRST CAMPAIGN
-              </LiquidButton>
-            </GlassCard>
-          )}
-        </div>
-      )}
+        </GlassCard>
 
-      {/* ── Donor: Recent donations ── */}
-      {isDonor && donations.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">Your Impact</p>
-              <h2 className="text-2xl font-bold text-white">Recent Donations</h2>
+        <GlassCard className="p-5 md:p-6 cf-animate-in cf-stagger-1">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-white/38 mb-3">Live Snapshot</p>
+          <div className="space-y-3">
+            {[
+              { label: 'Campaigns Active', value: `${campaigns.length}` },
+              { label: 'Escrow Mode', value: 'Milestone Locked' },
+              { label: 'Risk Tolerance', value: 'Strict' },
+              { label: 'Trust Rail', value: `${stats?.success_rate ?? '—'} success` },
+            ].map((row) => (
+              <div key={row.label} className="flex items-center justify-between rounded-xl border border-white/[0.11] bg-white/[0.04] px-3 py-2.5">
+                <span className="text-xs text-white/55">{row.label}</span>
+                <span className="text-sm text-white font-semibold">{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      </section>
+
+      <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {kpis.map(({ icon: Icon, label, value, hint }, i) => (
+          <GlassCard key={label} className="p-5 cf-animate-in" style={{ animationDelay: `${90 + i * 60}ms` }}>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-white/42">{label}</p>
+              <div className="w-9 h-9 rounded-xl bg-white/[0.07] border border-white/[0.15] flex items-center justify-center">
+                <Icon className="w-4 h-4 text-white/70" />
+              </div>
             </div>
-            <button
-              onClick={() => navigate('/my-donations')}
-              className="flex items-center gap-1 text-sm text-white/50 hover:text-white transition-colors"
-            >
+            <p className="cf-display text-3xl text-white mt-3">{value}</p>
+            <p className="text-xs text-white/48 mt-1">{hint}</p>
+          </GlassCard>
+        ))}
+      </section>
+
+      <section className="grid xl:grid-cols-[1.15fr_0.85fr] gap-4">
+        <GlassCard className="p-6 cf-animate-in cf-stagger-2" hover={false}>
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.16em] text-white/38">
+                {isNGO ? 'Your Projects' : 'Capital Opportunities'}
+              </p>
+              <h3 className="cf-section-title text-2xl text-white mt-1">
+                {isNGO ? 'Campaign Control Deck' : 'Featured Campaign Grid'}
+              </h3>
+            </div>
+            <button onClick={() => navigate('/campaigns')} className="text-sm text-white/58 hover:text-white flex items-center gap-1">
               View all <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-          <div className="grid gap-3">
-            {donations.slice(0, 4).map(d => (
-              <GlassCard key={d._id} className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-[oklch(0.65_0.25_25)]/10 flex items-center justify-center">
-                    <Heart className="w-5 h-5 text-[oklch(0.65_0.25_25)]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">{d.campaign_title ?? 'Campaign'}</p>
-                    <p className="text-xs text-white/40">{d.ngo_name ?? 'NGO'}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-white tabular-nums">{d.amount_sol.toFixed(2)} SOL</p>
-                  <div className="flex items-center gap-1 text-xs text-white/40 justify-end">
-                    <Clock className="w-3 h-3" />
-                    {d.created_at?.slice(0, 10)}
-                  </div>
-                </div>
-              </GlassCard>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* ── Featured / Explore Campaigns ── */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-1">
-              {isNGO ? 'Platform Activity' : 'Discover'}
-            </p>
-            <h2 className="text-2xl font-bold text-white">
-              {isNGO ? 'Active Campaigns' : 'Featured Campaigns'}
-            </h2>
-          </div>
-          <button
-            onClick={() => navigate('/campaigns')}
-            className="flex items-center gap-1 text-sm text-white/50 hover:text-white transition-colors"
-          >
-            View all <ChevronRight className="w-4 h-4" />
-          </button>
+          {featuredCampaigns.length > 0 ? (
+            <div className="grid md:grid-cols-2 gap-4">
+              {featuredCampaigns.slice(0, 4).map((campaign, i) => (
+                <div key={campaign._id} className="cf-animate-in" style={{ animationDelay: `${160 + i * 70}ms` }}>
+                  <CampaignCard
+                    campaign={campaign}
+                    actionLabel={isDonor ? 'Invest now' : undefined}
+                    onAction={isDonor ? openInvest : undefined}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/[0.12] bg-white/[0.03] p-10 text-center">
+              <p className="cf-section-title text-2xl text-white/85">No campaigns yet</p>
+              <p className="text-sm text-white/45 mt-2">Create one to activate milestone-based fundraising.</p>
+              {isNGO && (
+                <button
+                  onClick={() => navigate('/ngo-studio')}
+                  className="mt-5 h-11 px-5 rounded-xl border border-white/[0.2] bg-white/[0.06] text-sm text-white hover:bg-white/[0.1]"
+                >
+                  Open NGO Studio
+                </button>
+              )}
+            </div>
+          )}
+        </GlassCard>
+
+        <div className="space-y-4">
+          <GlassCard className="p-5 cf-animate-in cf-stagger-2">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="cf-section-title text-xl text-white">{isDonor ? 'Recent Deployments' : 'Ops Feed'}</h3>
+              <ArrowUpRight className="w-4 h-4 text-white/55" />
+            </div>
+            {isDonor && donations.length > 0 ? (
+              <div className="space-y-2.5">
+                {donations.slice(0, 5).map((d) => (
+                  <div key={d._id} className="rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 py-2.5 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-white">{d.campaign_title ?? 'Campaign'}</p>
+                      <p className="text-[11px] text-white/45">{d.ngo_name ?? 'NGO'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-white font-semibold tabular-nums">{d.amount_sol.toFixed(2)} SOL</p>
+                      <p className="text-[11px] text-white/40">{d.created_at?.slice(0, 10)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-white/45">
+                {isDonor
+                  ? 'Your donations will show up here once you deploy funds.'
+                  : 'Campaign operations and milestone events will appear here.'}
+              </p>
+            )}
+          </GlassCard>
+
+          <GlassCard className="p-5 cf-animate-in cf-stagger-3">
+            <h3 className="cf-section-title text-xl text-white mb-4">Quick Routes</h3>
+            <div className="grid gap-2.5">
+              {[
+                { label: isNGO ? 'Open NGO Studio' : 'Browse Campaigns', path: isNGO ? '/ngo-studio' : '/campaigns' },
+                { label: isNGO ? 'View Intelligence' : 'My Donation Ledger', path: isNGO ? '/analytics' : '/my-donations' },
+                { label: 'Account Settings', path: '/settings' },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => navigate(item.path)}
+                  className="w-full text-left rounded-xl border border-white/[0.11] bg-white/[0.04] px-3.5 py-3 text-sm text-white/72 hover:text-white hover:bg-white/[0.07] transition-all flex items-center justify-between"
+                >
+                  {item.label}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              ))}
+            </div>
+          </GlassCard>
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {featuredCampaigns.map(c => (
-            <CampaignCard
-              key={c._id}
-              campaign={c}
-              actionLabel={isDonor ? (c.status === 'active' ? 'Invest' : 'Under Review') : undefined}
-              onAction={isDonor && c.status === 'active' ? openInvest : undefined}
-              actionDisabled={c.status !== 'active'}
-            />
-          ))}
-        </div>
-      </div>
+      </section>
 
       {isDonor && selectedCampaign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeInvest} />
-          <div className="relative w-full max-w-md rounded-2xl border border-white/15 bg-[rgb(18,18,18)] shadow-2xl p-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={closeInvest} />
+          <GlassCard className="relative w-full max-w-lg p-6 border-white/[0.2]">
             <button
               onClick={closeInvest}
               disabled={investing}
-              className="absolute top-3 right-3 p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+              className="absolute top-3 right-3 p-2 rounded-lg text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
 
             {investResult ? (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold text-white">Investment Confirmed</h3>
-                <p className="text-sm text-white/60">
-                  Donation was recorded for <span className="text-white font-semibold">{selectedCampaign.title}</span>.
+                <h3 className="cf-section-title text-2xl text-white">Transfer Confirmed</h3>
+                <p className="text-sm text-white/62">
+                  Funds were recorded for <span className="text-white font-semibold">{selectedCampaign.title}</span>.
                 </p>
                 <div className="rounded-xl border border-white/[0.12] bg-white/[0.03] p-3">
-                  <p className="text-[10px] uppercase tracking-widest text-white/35 mb-1">Transaction</p>
-                  <p className="text-xs text-white/65 break-all font-mono">{investResult.signature}</p>
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-white/35 mb-1">Transaction Signature</p>
+                  <p className="text-xs text-white/70 break-all font-mono">{investResult.signature}</p>
                 </div>
                 <a
                   href={investResult.explorerUrl}
@@ -329,57 +350,57 @@ export default function Dashboard() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm text-[oklch(0.65_0.25_25)] hover:text-white"
                 >
-                  View on Solana Explorer <ExternalLink className="w-3.5 h-3.5" />
+                  Open in Solana Explorer <ExternalLink className="w-3.5 h-3.5" />
                 </a>
-                <div className="pt-2">
-                  <LiquidButton className="w-full" onClick={closeInvest}>Done</LiquidButton>
-                </div>
+                <button onClick={closeInvest} className="w-full h-11 rounded-xl border border-white/[0.18] bg-white/[0.06] text-sm text-white hover:bg-white/[0.1]">
+                  Done
+                </button>
               </div>
             ) : (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold text-white">Confirm Investment</h3>
-                <p className="text-sm text-white/60">
-                  Send SOL from your donor wallet to this campaign vault.
-                </p>
+                <h3 className="cf-section-title text-2xl text-white">Deploy Capital</h3>
+                <p className="text-sm text-white/60">Send SOL directly to the campaign vault with escrow protections.</p>
+
                 <div className="rounded-xl border border-white/[0.12] bg-white/[0.03] p-3">
-                  <p className="text-[10px] uppercase tracking-widest text-white/35 mb-1">Campaign</p>
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-white/35 mb-1">Target Campaign</p>
                   <p className="text-sm text-white font-semibold">{selectedCampaign.title}</p>
                   <p className="text-[11px] text-white/45 mt-1 break-all">Vault: {selectedCampaign.vault_address ?? 'Not configured'}</p>
                 </div>
+
                 <div>
-                  <label className="text-xs font-semibold uppercase tracking-widest text-white/45 mb-2 block">
-                    Amount (SOL)
-                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-white/50 mb-2 block">Amount (SOL)</label>
                   <input
                     type="number"
                     value={investAmount}
                     onChange={(e) => setInvestAmount(e.target.value)}
                     min="0.01"
                     step="0.01"
-                    className="w-full px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
+                    className="cf-soft-input"
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {['0.1', '0.5', '1'].map(v => (
+
+                <div className="grid grid-cols-4 gap-2">
+                  {['0.1', '0.5', '1', '2'].map((preset) => (
                     <button
-                      key={v}
-                      onClick={() => setInvestAmount(v)}
-                      className="py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white/65 text-xs hover:bg-white/[0.08] hover:text-white"
+                      key={preset}
+                      onClick={() => setInvestAmount(preset)}
+                      className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] text-xs text-white/70 hover:bg-white/[0.08] hover:text-white transition-all"
                     >
-                      {v} SOL
+                      {preset}
                     </button>
                   ))}
                 </div>
-                <LiquidButton
-                  className="w-full"
+
+                <button
                   onClick={confirmInvest}
                   disabled={investing || !selectedCampaign.vault_address}
+                  className="w-full h-11 rounded-xl text-sm font-semibold text-white border border-white/[0.2] bg-[linear-gradient(130deg,rgba(255,109,62,0.92),rgba(56,189,248,0.78))] disabled:opacity-50"
                 >
-                  {investing ? 'Processing Transaction...' : 'Confirm & Send'}
-                </LiquidButton>
+                  {investing ? 'Processing transaction...' : 'Confirm transfer'}
+                </button>
               </div>
             )}
-          </div>
+          </GlassCard>
         </div>
       )}
     </div>
