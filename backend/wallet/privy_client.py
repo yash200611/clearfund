@@ -107,3 +107,25 @@ class PrivyClient:
             data = resp.json()
             lamports = data["result"]["value"]
             return lamports / LAMPORTS_PER_SOL
+
+    async def request_airdrop(self, address: str, sol: float = 5.0) -> str:
+        """
+        Request a devnet SOL airdrop for an address.
+        Only works on devnet/testnet. Returns transaction signature.
+        """
+        lamports = int(sol * LAMPORTS_PER_SOL)
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                SOLANA_RPC_URL,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "requestAirdrop",
+                    "params": [address, lamports],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                raise Exception(f"Airdrop failed: {data['error']}")
+            return data["result"]  # transaction signature

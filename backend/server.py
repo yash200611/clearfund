@@ -14,6 +14,7 @@ from auth import TokenData, decode_token, get_current_user, require_donor, requi
 from pipeline.milestone_pipeline import process_milestone_submission
 from realtime.broker import manager
 from analytics.lava_client import LavaClient
+from wallet.privy_client import PrivyClient
 from analytics.cached_lava import get_cached_vault_transactions, get_cached_vault_stats
 from models import (
     Campaign,
@@ -109,7 +110,7 @@ async def get_me(user: TokenData = Depends(get_current_user)):
         new_user = {
             "auth0_sub": user.sub,
             "email": user.email,
-            "role": user.role,
+            "role": user.role or None,   # null = needs role selection
             "privy_wallet_id": None,
             "wallet_address": None,
             "created_at": datetime.now(timezone.utc),
@@ -368,6 +369,60 @@ class UpdateProfileRequest(_BaseModel):
 class UpdatePasswordRequest(_BaseModel):
     current: str
     next: str
+
+class UpdateRoleRequest(_BaseModel):
+    role: str
+
+@app.put("/api/users/me/role")
+async def update_role(body: UpdateRoleRequest, user: TokenData = Depends(get_current_user)):
+    if body.role not in ("donor", "ngo"):
+        raise HTTPException(status_code=400, detail="Role must be 'donor' or 'ngo'")
+
+    existing = await db.users.find_one({"auth0_sub": user.sub})
+    update: dict = {"role": body.role}
+
+    # Only create wallet if user doesn't have one yet
+    if existing and not existing.get("wallet_address"):
+        try:
+            privy = PrivyClient()
+            wallet = await privy.create_embedded_wallet(user.sub)
+            update["privy_wallet_id"] = wallet["wallet_id"]
+            update["wallet_address"] = wallet["address"]
+
+            # Donors get 5 devnet SOL so they can demo donations immediately
+            if body.role == "donor":
+                try:
+                    await privy.request_airdrop(wallet["address"], sol=5.0)
+                    update["wallet_balance_sol"] = 5.0
+                    print(f"[Wallet] Airdropped 5 SOL to donor {wallet['address']}")
+                except Exception as e:
+                    print(f"[Wallet] Airdrop failed (non-fatal): {e}")
+
+            print(f"[Wallet] Created {body.role} wallet: {wallet['address']}")
+        except Exception as e:
+            print(f"[Wallet] Wallet creation failed (non-fatal): {e}")
+
+    await db.users.update_one(
+        {"auth0_sub": user.sub},
+        {"$set": update},
+    )
+    doc = await db.users.find_one({"auth0_sub": user.sub})
+    return serialize(doc)
+
+@app.get("/api/users/me/wallet")
+async def get_my_wallet(user: TokenData = Depends(get_current_user)):
+    """Returns the user's wallet address and live SOL balance."""
+    doc = await db.users.find_one({"auth0_sub": user.sub})
+    if not doc or not doc.get("wallet_address"):
+        return {"wallet_address": None, "balance_sol": 0.0}
+    address = doc["wallet_address"]
+    try:
+        privy = PrivyClient()
+        balance = await privy.get_wallet_balance(address)
+    except Exception:
+        balance = 0.0
+    return {"wallet_address": address, "balance_sol": balance}
+
 
 @app.put("/api/users/me")
 async def update_profile(body: UpdateProfileRequest, user: TokenData = Depends(get_current_user)):

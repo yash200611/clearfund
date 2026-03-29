@@ -203,3 +203,10 @@ export async function updatePassword(data: { current: string; next: string }) {
     body: JSON.stringify(data),
   });
 }
+
+export async function updateRole(role: 'donor' | 'ngo') {
+  return apiFetch('/api/users/me/role', {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
