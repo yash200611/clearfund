@@ -24,6 +24,42 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const ROLE_CLAIM = 'https://clearfund.app/role';
+const USER_CACHE_KEY = 'clearfund_app_user';
+
+interface CachedUserPayload {
+  sub: string;
+  user: AppUser;
+}
+
+function readCachedUser(sub: string | null): AppUser | null {
+  if (!sub) return null;
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedUserPayload;
+    if (!parsed?.user || parsed.sub !== sub) return null;
+    return parsed.user;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(sub: string, user: AppUser) {
+  try {
+    const payload: CachedUserPayload = { sub, user };
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore cache write failures.
+  }
+}
+
+function clearCachedUser() {
+  try {
+    localStorage.removeItem(USER_CACHE_KEY);
+  } catch {
+    // Ignore cache clear failures.
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const {
@@ -37,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profileResolvedFromBackend, setProfileResolvedFromBackend] = useState(false);
   const getTokenSilentlyRef = useRef(getAccessTokenSilently);
 
   const auth0Sub = auth0User?.sub ?? null;
@@ -58,16 +95,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated || !auth0Sub) {
       setAppUser(null);
+      setProfileResolvedFromBackend(false);
       return;
     }
 
+    const cachedUser = readCachedUser(auth0Sub);
     const fallbackUser: AppUser = {
-      id: auth0Sub,
-      name: auth0Name,
-      email: auth0Email,
-      role: tokenRole,
-      avatar: auth0Avatar,
+      id: cachedUser?.id ?? auth0Sub,
+      name: auth0Name || cachedUser?.name || '',
+      email: auth0Email || cachedUser?.email || '',
+      role: cachedUser?.role ?? tokenRole,
+      avatar: auth0Avatar ?? cachedUser?.avatar,
+      wallet_address: cachedUser?.wallet_address,
     };
+    setAppUser(prev => prev ?? fallbackUser);
 
     let cancelled = false;
 
@@ -81,24 +122,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           wallet_address?: string;
         };
         if (!cancelled) {
-          setAppUser(prev => ({
+          const nextUser: AppUser = {
             id: profile._id ?? profile.id ?? fallbackUser.id,
             name: fallbackUser.name,
             email: fallbackUser.email,
-            role: profile.role ?? prev?.role ?? fallbackUser.role,
+            role: profile.role ?? cachedUser?.role ?? fallbackUser.role,
             avatar: fallbackUser.avatar,
-            wallet_address: profile.wallet_address ?? prev?.wallet_address,
-          }));
+            wallet_address: profile.wallet_address ?? cachedUser?.wallet_address,
+          };
+          setAppUser(nextUser);
+          writeCachedUser(auth0Sub!, nextUser);
+          setProfileResolvedFromBackend(true);
         }
       } catch {
         if (!cancelled) {
-          setAppUser(prev => prev ? {
-            ...prev,
-            name: prev.name || fallbackUser.name,
-            email: prev.email || fallbackUser.email,
-            avatar: prev.avatar ?? fallbackUser.avatar,
-            role: prev.role ?? fallbackUser.role,
-          } : fallbackUser);
+          // Keep cached/fallback user so we don't force role selection on temporary backend failures.
+          setAppUser(prev => prev ?? fallbackUser);
+          setProfileResolvedFromBackend(false);
         }
       } finally {
         if (!cancelled) {
@@ -117,8 +157,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loginWithRedirect({
       authorizationParams: {
         screen_hint: options?.screen_hint,
-        // Force interactive login/signup screen instead of silent SSO bounce.
-        prompt: 'login',
       },
       appState: {
         returnTo: options?.returnTo ?? '/dashboard',
@@ -128,6 +166,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     setAppUser(null);
+    setProfileResolvedFromBackend(false);
+    clearCachedUser();
     auth0Logout({
       logoutParams: {
         returnTo: window.location.origin,
@@ -136,18 +176,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [auth0Logout]);
 
   const setRole = useCallback(async (role: 'donor' | 'ngo') => {
-    await updateRole(role);
-    setAppUser(prev => prev ? { ...prev, role } : prev);
-  }, []);
+    const updated = await updateRole(role) as {
+      _id?: string;
+      id?: string;
+      role?: AppUser['role'];
+      wallet_address?: string;
+    };
+    setAppUser(prev => {
+      if (!prev) return prev;
+      const nextUser: AppUser = {
+        ...prev,
+        id: updated._id ?? updated.id ?? prev.id,
+        role: updated.role ?? role,
+        wallet_address: updated.wallet_address ?? prev.wallet_address,
+      };
+      if (auth0Sub) writeCachedUser(auth0Sub, nextUser);
+      return nextUser;
+    });
+    setProfileResolvedFromBackend(true);
+  }, [auth0Sub]);
 
-  const needsRoleSelection = isAuthenticated && !!appUser && !appUser.role;
+  const needsRoleSelection =
+    isAuthenticated &&
+    !!appUser &&
+    !appUser.role &&
+    profileResolvedFromBackend;
 
   return (
     <AuthContext.Provider
       value={{
         user: appUser,
-        isAuthenticated: isAuthenticated && !!appUser,
-        isLoading: auth0Loading || profileLoading,
+        isAuthenticated,
+        isLoading: auth0Loading || (profileLoading && !appUser),
         needsRoleSelection,
         login,
         logout,

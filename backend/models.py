@@ -63,6 +63,7 @@ class Campaign(BaseModel):
     category: str
     total_raised_sol: float = 0.0
     vault_address: Optional[str] = None
+    privy_vault_wallet_id: Optional[str] = None
     status: CampaignStatus = CampaignStatus.draft
     trust_score: float = 0.0
     failure_count: int = 0

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Users, Clock } from 'lucide-react'
+import { ArrowUpRight, Clock, Loader2, Users } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
 import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
@@ -37,10 +37,12 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
         <div className="cf-shimmer absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
-        <div className="absolute top-3 left-3 flex flex-wrap gap-2">
+        <div className="absolute top-3 left-3 flex gap-2 flex-wrap items-center">
+          {campaign.status === 'under_review' && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
           <StatusBadge status={campaign.status} />
-          <TrustBadge score={campaign.trust_score} size="sm" />
+          {campaign.status !== 'under_review' && <TrustBadge score={campaign.trust_score} size="sm" />}
         </div>
+
         <div className="absolute top-3 right-3">
           <RiskBadge failureCount={campaign.failure_count} />
         </div>
@@ -85,14 +87,14 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
           </div>
         </div>
 
-        {actionLabel && onAction && (
+        {actionLabel && (
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onAction(campaign)
+              if (onAction && !actionDisabled) onAction(campaign)
             }}
-            disabled={actionDisabled}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-white border border-white/[0.2] bg-[linear-gradient(130deg,rgba(255,109,62,0.92),rgba(56,189,248,0.78))] hover:brightness-110 disabled:opacity-50 transition-all"
+            disabled={actionDisabled || !onAction}
+            className="w-full rounded-xl py-3 text-sm font-semibold text-white border border-white/[0.2] bg-[linear-gradient(130deg,rgba(255,109,62,0.92),rgba(56,189,248,0.78))] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {actionLabel}
           </button>

@@ -238,6 +238,12 @@ def serialize(doc: dict) -> dict:
     return doc
 
 
+def public_campaign(doc: dict) -> dict:
+    out = serialize(doc)
+    out.pop("privy_vault_wallet_id", None)
+    return out
+
+
 def _optional_user_from_request(request: Request) -> Optional[TokenData]:
     auth_header = request.headers.get("authorization", "")
     if not auth_header.lower().startswith("bearer "):
@@ -263,10 +269,12 @@ def _optional_user_from_request(request: Request) -> Optional[TokenData]:
 async def _run_campaign_intake_review(campaign_id: str) -> None:
     """
     Background task: send campaign to Gemini, then update status.
-    - approve    -> active
-    - reject     -> rejected
-    - needs_info -> under_review
+    - approve + trust_score >= 60 + vault_address present -> active
+    - reject                                               -> rejected
+    - anything else                                        -> under_review
     """
+    MIN_TRUST_SCORE = 60
+
     try:
         if not ObjectId.is_valid(campaign_id):
             logger.warning("[CampaignReview] invalid campaign_id=%s", campaign_id)
@@ -279,27 +287,52 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
 
         campaign = serialize(dict(campaign_doc))
         logger.info("[CampaignReview] started campaign_id=%s title=%s", campaign_id, campaign.get("title"))
+
+        await manager.broadcast_global(
+            event_type="campaign_review_started",
+            milestone_id="",
+            payload={"campaign_id": campaign_id, "title": campaign.get("title", "")},
+        )
+
         result = await run_campaign_review_agent(campaign)
+        logger.info(
+            "[CampaignReview] agent_result campaign_id=%s recommendation=%s confidence=%s trust_score=%s risk_flags=%s reasoning=%s",
+            campaign_id,
+            result.get("recommendation"),
+            result.get("confidence_score"),
+            result.get("trust_score"),
+            result.get("risk_flags"),
+            str(result.get("reasoning", ""))[:300],
+        )
 
         recommendation = str(result.get("recommendation", "needs_info"))
-        new_status = "under_review"
-        if recommendation == "approve":
-            new_status = "active"
-        elif recommendation == "reject":
-            new_status = "rejected"
-
         trust_score = int(result.get("trust_score", campaign.get("trust_score", 0) or 0))
         trust_score = max(0, min(100, trust_score))
+        vault_address = campaign.get("vault_address", "")
+
+        # Campaign only goes live if Gemini approves, score is sufficient, and vault exists
+        if recommendation == "reject":
+            new_status = "rejected"
+        elif recommendation == "approve" and trust_score >= MIN_TRUST_SCORE and vault_address:
+            new_status = "active"
+        else:
+            new_status = "under_review"
+
+        risk_flags = result.get("risk_flags", [])
+        if not vault_address:
+            risk_flags = list(risk_flags) + ["no_vault_address"]
+        if trust_score < MIN_TRUST_SCORE and recommendation == "approve":
+            risk_flags = list(risk_flags) + [f"trust_score_below_threshold_{trust_score}"]
 
         review_update = {
             "status": new_status,
             "trust_score": trust_score,
             "campaign_review": {
-                "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-pro"),
+                "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-flash"),
                 "recommendation": recommendation,
                 "confidence_score": int(result.get("confidence_score", 0)),
                 "reasoning": str(result.get("reasoning", "")),
-                "risk_flags": result.get("risk_flags", []),
+                "risk_flags": risk_flags,
                 "reviewed_at": datetime.now(timezone.utc),
             },
         }
@@ -307,10 +340,22 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
         await db.campaigns.update_one({"_id": ObjectId(campaign_id)}, {"$set": review_update})
         logger.info(
             "[CampaignReview] complete campaign_id=%s recommendation=%s status=%s trust_score=%s",
-            campaign_id,
-            recommendation,
-            new_status,
-            trust_score,
+            campaign_id, recommendation, new_status, trust_score,
+        )
+
+        await manager.broadcast_global(
+            event_type="campaign_review_completed",
+            milestone_id="",
+            payload={
+                "campaign_id": campaign_id,
+                "title": campaign.get("title", ""),
+                "recommendation": recommendation,
+                "status": new_status,
+                "trust_score": trust_score,
+                "confidence_score": int(result.get("confidence_score", 0)),
+                "reasoning": str(result.get("reasoning", "")),
+                "risk_flags": risk_flags,
+            },
         )
 
         await db.agent_audit_logs.insert_one({
@@ -322,7 +367,7 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
                 "status": new_status,
                 "confidence_score": int(result.get("confidence_score", 0)),
                 "reasoning": str(result.get("reasoning", "")),
-                "risk_flags": result.get("risk_flags", []),
+                "risk_flags": risk_flags,
             },
             "created_at": datetime.now(timezone.utc),
         })
@@ -488,9 +533,15 @@ async def get_me(user: TokenData = Depends(get_current_user)):
 # ─── Campaigns ───────────────────────────────────────────────────────────────
 
 @app.get("/api/campaigns")
-async def list_campaigns(request: Request):
+async def list_campaigns(
+    request: Request,
+    category: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+):
     viewer = _optional_user_from_request(request)
-    query = {"status": "active"}
+    public_statuses = ["active", "under_review"]
+    query_parts: list[dict] = []
 
     if viewer:
         viewer_doc = await db.users.find_one({"auth0_sub": viewer.sub}, {"role": 1})
@@ -500,13 +551,31 @@ async def list_campaigns(request: Request):
             if ngo_doc:
                 ngo_id = str(ngo_doc["_id"])
                 # NGO can see all of their own campaigns (including under_review/rejected),
-                # plus globally active campaigns.
-                query = {"$or": [{"status": "active"}, {"ngo_id": ngo_id}]}
+                # plus publicly visible campaigns.
+                query_parts.append({"$or": [{"status": {"$in": public_statuses}}, {"ngo_id": ngo_id}]})
+            else:
+                query_parts.append({"status": {"$in": public_statuses}})
+        else:
+            query_parts.append({"status": {"$in": public_statuses}})
+    else:
+        query_parts.append({"status": {"$in": public_statuses}})
+
+    if status and status != "All":
+        query_parts.append({"status": status})
+
+    if category and category != "All":
+        query_parts.append({"category": category})
+
+    if search:
+        rx = {"$regex": search, "$options": "i"}
+        query_parts.append({"$or": [{"title": rx}, {"description": rx}, {"ngo_name": rx}]})
+
+    query = query_parts[0] if len(query_parts) == 1 else {"$and": query_parts}
 
     cursor = db.campaigns.find(query).sort("created_at", -1)
     campaigns = []
     async for doc in cursor:
-        campaigns.append(serialize(doc))
+        campaigns.append(public_campaign(doc))
     return campaigns
 
 
@@ -520,14 +589,48 @@ async def create_campaign(
     if not ngo_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
+    campaign_oid = ObjectId()
+    campaign_id = str(campaign_oid)
+
+    # Vault must be provisioned before campaign is created.
+    try:
+        privy = PrivyClient()
+        vault_wallet = await asyncio.wait_for(
+            privy.create_campaign_vault_wallet(campaign_id),
+            timeout=12,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[CampaignCreate] vault provisioning timed out sub=%s campaign_id=%s",
+            user.sub,
+            campaign_id,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="Vault provisioning timed out. Please retry in a few seconds.",
+        )
+    except Exception as e:
+        logger.exception(
+            "[CampaignCreate] vault provisioning failed sub=%s campaign_id=%s error=%s",
+            user.sub,
+            campaign_id,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to provision campaign vault wallet",
+        )
+
     campaign = {
+        "_id": campaign_oid,
         "ngo_id": str(ngo_doc["_id"]),
         "ngo_name": ngo_doc.get("name") or ngo_doc.get("email") or "NGO",
         "title": body.title,
         "description": body.description,
         "category": body.category,
         "total_raised_sol": 0.0,
-        "vault_address": body.vault_address,
+        "vault_address": vault_wallet["address"],
+        "privy_vault_wallet_id": vault_wallet["wallet_id"],
         "status": "under_review",
         "trust_score": 0.0,
         "failure_count": 0,
@@ -540,14 +643,13 @@ async def create_campaign(
         },
         "created_at": datetime.now(timezone.utc),
     }
-    result = await db.campaigns.insert_one(campaign)
-    campaign_id = str(result.inserted_id)
+    await db.campaigns.insert_one(campaign)
     campaign["_id"] = campaign_id
 
     logger.info("[CampaignReview] queued campaign_id=%s title=%s", campaign_id, campaign.get("title"))
     background_tasks.add_task(_run_campaign_intake_review, campaign_id)
 
-    return campaign
+    return public_campaign(campaign)
 
 
 @app.get("/api/campaigns/{campaign_id}")
@@ -562,7 +664,7 @@ async def get_campaign(campaign_id: str):
     async for m in db.milestones.find({"campaign_id": campaign_id}):
         milestones.append(serialize(m))
 
-    campaign = serialize(doc)
+    campaign = public_campaign(doc)
     campaign["milestones"] = milestones
     return campaign
 
@@ -583,6 +685,8 @@ async def create_donation(
     campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "active":
+        raise HTTPException(status_code=422, detail="Campaign is under review and not accepting donations yet")
 
     if body.amount_sol <= 0:
         raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
@@ -646,6 +750,8 @@ async def create_donation_from_transfer(
     campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "active":
+        raise HTTPException(status_code=422, detail="Campaign is under review and not accepting donations yet")
 
     vault_address = campaign.get("vault_address")
     if not vault_address:

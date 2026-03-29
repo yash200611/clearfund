@@ -49,6 +49,10 @@ export default function CampaignDetail() {
       toast.error('This campaign has no vault address configured')
       return
     }
+    if (campaign.status !== 'active') {
+      toast.error('This campaign is still under review and not accepting donations yet')
+      return
+    }
 
     setDonating(true)
     setTxResult(null)
@@ -200,9 +204,15 @@ export default function CampaignDetail() {
                         <p className="text-xs text-amber-200/85">This campaign has no vault address configured. Donations are disabled.</p>
                       </div>
                     )}
+                    {campaign.status !== 'active' && (
+                      <div className="flex items-start gap-2 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-amber-300/80">Campaign is under review. Donations unlock after approval.</p>
+                      </div>
+                    )}
 
                     <div className="mt-4">
-                      <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !campaign.vault_address}>
+                      <LiquidButton className="w-full" onClick={handleDonate} disabled={donating || !campaign.vault_address || campaign.status !== 'active'}>
                         {donating ? 'Processing transaction...' : 'Donate to Escrow'}
                       </LiquidButton>
                     </div>
