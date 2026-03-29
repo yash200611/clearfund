@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 PRIVY_APP_ID     = os.getenv("PRIVY_APP_ID", "")
 PRIVY_APP_SECRET = os.getenv("PRIVY_APP_SECRET", "")
-SOLANA_RPC_URL   = f"https://api.{os.getenv('SOLANA_NETWORK', 'devnet')}.solana.com"
+SOLANA_RPC_URL   = os.getenv("SOLANA_RPC_URL") or f"https://api.{os.getenv('SOLANA_NETWORK', 'devnet')}.solana.com"
 
 # auth.privy.io  → user auth endpoints
 # api.privy.io   → server wallet endpoints
