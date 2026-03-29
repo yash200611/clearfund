@@ -4,7 +4,7 @@ Manages server-side Solana wallets via Privy's API.
 """
 
 import base64
-import json
+import logging
 import os
 from typing import Optional
 
@@ -13,10 +13,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 PRIVY_APP_ID     = os.getenv("PRIVY_APP_ID", "")
 PRIVY_APP_SECRET = os.getenv("PRIVY_APP_SECRET", "")
 SOLANA_RPC_URL   = f"https://api.{os.getenv('SOLANA_NETWORK', 'devnet')}.solana.com"
-PRIVY_BASE_URL   = "https://auth.privy.io/api/v1"
+
+# auth.privy.io  → user auth endpoints
+# api.privy.io   → server wallet endpoints
+PRIVY_AUTH_URL   = "https://auth.privy.io/api/v1"
+PRIVY_API_URL    = "https://api.privy.io/v1"
 
 LAMPORTS_PER_SOL = 1_000_000_000
 
@@ -43,39 +49,64 @@ class PrivyClient:
 
     async def create_embedded_wallet(self, owner_id: str) -> dict:
         """
-        Create a server-side Solana wallet.
+        Create a server-side Solana wallet via Privy's server wallet API.
         Returns { wallet_id, address }
         """
         _check_configured()
-        owner_id = (owner_id or "").strip()
-        if not owner_id:
-            raise ValueError("owner_id is required to create a wallet")
+        logger.info("[Privy] creating server wallet | app_id=%s", PRIVY_APP_ID)
+
+        request_body = {"chain_type": "solana"}
+        url = f"{PRIVY_API_URL}/wallets"
+
+        logger.info("[Privy] POST %s | body=%s", url, request_body)
+
         timeout = httpx.Timeout(connect=6.0, read=10.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                f"{PRIVY_BASE_URL}/wallets",
-                headers=_auth_headers(),
-                json={
-                    "chain_type": "solana",
-                    "owner": {
-                        "type": "server",
-                    },
-                },
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    url,
+                    headers=_auth_headers(),
+                    json=request_body,
+                )
+                logger.info(
+                    "[Privy] response status=%s | body=%s",
+                    resp.status_code,
+                    resp.text,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                wallet_id = data.get("id")
+                address   = data.get("address")
+                logger.info(
+                    "[Privy] wallet created | wallet_id=%s address=%s",
+                    wallet_id,
+                    address,
+                )
+                return {
+                    "wallet_id": wallet_id,
+                    "address":   address,
+                }
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "[Privy] HTTP error | status=%s | response=%s",
+                e.response.status_code,
+                e.response.text,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            return {
-                "wallet_id": data["id"],
-                "address": data["address"],
-            }
+            raise
+        except httpx.TimeoutException as e:
+            logger.error("[Privy] request timed out: %s", str(e))
+            raise
+        except Exception as e:
+            logger.exception("[Privy] unexpected error: %s", str(e))
+            raise
 
     async def create_campaign_vault_wallet(self, campaign_id: str) -> dict:
         """
         Create a dedicated server-side Solana vault wallet for a campaign.
         Returns { wallet_id, address }
         """
-        owner_ref = f"campaign-vault:{campaign_id}"
-        return await self.create_embedded_wallet(owner_ref)
+        logger.info("[Privy] provisioning vault for campaign_id=%s", campaign_id)
+        return await self.create_embedded_wallet(campaign_id)
 
     async def sign_and_send_transaction(self, wallet_id: str, tx_base64: str) -> str:
         """
@@ -83,9 +114,11 @@ class PrivyClient:
         Returns the transaction signature string.
         """
         _check_configured()
+        url = f"{PRIVY_API_URL}/wallets/{wallet_id}/rpc"
+        logger.info("[Privy] signing tx | wallet_id=%s url=%s", wallet_id, url)
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"{PRIVY_BASE_URL}/wallets/{wallet_id}/rpc",
+                url,
                 headers=_auth_headers(),
                 json={
                     "method": "signAndSendTransaction",
@@ -94,6 +127,11 @@ class PrivyClient:
                         "encoding": "base64",
                     },
                 },
+            )
+            logger.info(
+                "[Privy] sign response status=%s | body=%s",
+                resp.status_code,
+                resp.text,
             )
             resp.raise_for_status()
             data = resp.json()
