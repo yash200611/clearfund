@@ -6,7 +6,7 @@ import time
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
@@ -91,6 +91,7 @@ def _localnet_sign_and_send(from_address: str, to_address: str, amount_sol: floa
 
 LAMPORTS_PER_SOL = 1_000_000_000
 EXPLORER_BASE = "https://explorer.solana.com/tx"
+FLOAT_EPSILON = 1e-9
 
 app = FastAPI(title="Milestone Escrow API")
 
@@ -273,8 +274,88 @@ def serialize(doc: dict) -> dict:
 
 def public_campaign(doc: dict) -> dict:
     out = serialize(doc)
+    if "total_raised_sol" not in out and "total_raised" in out:
+        out["total_raised_sol"] = out.get("total_raised", 0.0)
+    if "total_raised" not in out:
+        out["total_raised"] = out.get("total_raised_sol", 0.0)
+    out.setdefault("total_budget_sol", out.get("goal", 0.0))
+    out.setdefault("goal", out.get("total_budget_sol", 0.0))
+    out.setdefault("budget_breakdown", [])
+    out.setdefault("milestones", [])
+    out.setdefault("slash_history", [])
     out.pop("privy_vault_wallet_id", None)
     return out
+
+
+def _sum_amount(items: list[dict], *, key: str = "amount_sol") -> float:
+    total = 0.0
+    for item in items:
+        total += float(item.get(key, 0.0) or 0.0)
+    return round(total, 9)
+
+
+def _is_close(a: float, b: float, *, tolerance: float = FLOAT_EPSILON) -> bool:
+    return abs(a - b) <= tolerance
+
+
+def _is_milestone_approved(status_value: str) -> bool:
+    return status_value in ("approved", "released")
+
+
+def _to_dashboard_milestone_status(status_value: str) -> str:
+    if status_value in ("approved", "released"):
+        return "approved"
+    if status_value == "processing":
+        return "submitted"
+    return status_value
+
+
+def _normalize_campaign_milestones(raw_milestones: list[dict]) -> list[dict]:
+    ordered = sorted(
+        raw_milestones,
+        key=lambda m: int(m.get("order_index", 0)),
+    )
+    normalized = []
+    for raw in ordered:
+        item = dict(raw)
+        item["status"] = _to_dashboard_milestone_status(str(item.get("status", "pending")))
+        normalized.append(item)
+    return normalized
+
+
+async def _load_campaign_milestones(campaign_id: str, campaign_doc: dict) -> list[dict]:
+    embedded = campaign_doc.get("milestones")
+    if isinstance(embedded, list) and embedded:
+        return _normalize_campaign_milestones(embedded)
+
+    milestones = []
+    cursor = db.milestones.find({"campaign_id": campaign_id}).sort([("order_index", 1), ("created_at", 1)])
+    async for doc in cursor:
+        entry = serialize(dict(doc))
+        entry["milestone_id"] = entry.get("_id")
+        entry["order_index"] = int(entry.get("order_index", len(milestones)))
+        entry["expected_completion_date"] = entry.get("due_date")
+        entry["status"] = _to_dashboard_milestone_status(str(entry.get("status", "pending")))
+        milestones.append(entry)
+    return milestones
+
+
+async def _sync_campaign_milestone(
+    *,
+    campaign_id: str,
+    milestone_id: str,
+    update_fields: dict[str, Any],
+) -> None:
+    if not ObjectId.is_valid(campaign_id):
+        return
+    set_payload = {f"milestones.$[m].{k}": v for k, v in update_fields.items()}
+    if not set_payload:
+        return
+    await db.campaigns.update_one(
+        {"_id": ObjectId(campaign_id)},
+        {"$set": set_payload},
+        array_filters=[{"m.milestone_id": milestone_id}],
+    )
 
 
 def _optional_user_from_request(request: Request) -> Optional[TokenData]:
@@ -623,12 +704,68 @@ async def create_campaign(
 
     MIN_TRUST_SCORE = 60
     ngo_name = ngo_doc.get("name") or ngo_doc.get("email") or "NGO"
+    total_budget_sol = round(float(body.total_budget_sol or 0.0), 9)
+    if total_budget_sol <= 0:
+        raise HTTPException(status_code=400, detail="total_budget_sol must be greater than zero")
+
+    budget_breakdown: list[dict] = []
+    for raw_item in body.budget_breakdown:
+        name = str(raw_item.name or "").strip()
+        amount_sol = round(float(raw_item.amount_sol or 0.0), 9)
+        if not name:
+            raise HTTPException(status_code=400, detail="Each budget category must include a name")
+        if amount_sol <= 0:
+            raise HTTPException(status_code=400, detail=f"Budget amount must be > 0 for category '{name}'")
+        budget_breakdown.append({"name": name, "amount_sol": amount_sol})
+
+    if not budget_breakdown:
+        raise HTTPException(status_code=400, detail="At least one budget category is required")
+
+    budget_sum = _sum_amount(budget_breakdown)
+    if not _is_close(budget_sum, total_budget_sol):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Budget breakdown sum ({budget_sum}) must equal total_budget_sol ({total_budget_sol})",
+        )
+
+    if len(body.milestones) < 2 or len(body.milestones) > 5:
+        raise HTTPException(status_code=422, detail="Campaign must define between 2 and 5 milestones")
+
+    milestone_inputs: list[dict] = []
+    for index, m in enumerate(body.milestones):
+        title = str(m.title or "").strip()
+        description = str(m.description or "").strip()
+        amount_sol = round(float(m.amount_sol or 0.0), 9)
+        if not title:
+            raise HTTPException(status_code=400, detail=f"Milestone {index + 1} title is required")
+        if not description:
+            raise HTTPException(status_code=400, detail=f"Milestone {index + 1} description is required")
+        if amount_sol <= 0:
+            raise HTTPException(status_code=400, detail=f"Milestone {index + 1} amount_sol must be > 0")
+        milestone_inputs.append(
+            {
+                "title": title,
+                "description": description,
+                "amount_sol": amount_sol,
+                "expected_completion_date": m.expected_completion_date,
+            }
+        )
+
+    milestone_sum = _sum_amount(milestone_inputs)
+    if not _is_close(milestone_sum, total_budget_sol):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Milestone amount sum ({milestone_sum}) must equal total_budget_sol ({total_budget_sol})",
+        )
 
     # Hard intake gate: do not create DB record unless Gemini approves with trust >= threshold.
     review_input = {
         "title": body.title,
         "description": body.description,
         "category": body.category,
+        "total_budget_sol": total_budget_sol,
+        "budget_breakdown": budget_breakdown,
+        "milestones": milestone_inputs,
         # Vault is provisioned only after passing review.
         "vault_address": "pending",
     }
@@ -688,6 +825,7 @@ async def create_campaign(
             detail="Unable to provision campaign vault wallet",
         )
 
+    now = datetime.now(timezone.utc)
     campaign = {
         "_id": campaign_oid,
         "ngo_id": str(ngo_doc["_id"]),
@@ -695,7 +833,13 @@ async def create_campaign(
         "title": body.title,
         "description": body.description,
         "category": body.category,
+        "goal": total_budget_sol,
+        "total_budget_sol": total_budget_sol,
+        "total_raised": 0.0,
         "total_raised_sol": 0.0,
+        "budget_breakdown": budget_breakdown,
+        "milestones": [],
+        "slash_history": [],
         "vault_address": vault_wallet["address"],
         "privy_vault_wallet_id": vault_wallet["wallet_id"],
         "status": "active",
@@ -707,12 +851,59 @@ async def create_campaign(
             "confidence_score": int(review_result.get("confidence_score", 0)),
             "reasoning": reasoning,
             "risk_flags": risk_flags if isinstance(risk_flags, list) else [str(risk_flags)],
-            "reviewed_at": datetime.now(timezone.utc),
+            "reviewed_at": now,
         },
-        "created_at": datetime.now(timezone.utc),
+        "created_at": now,
     }
     await db.campaigns.insert_one(campaign)
+
+    milestone_docs = []
+    for index, m in enumerate(milestone_inputs):
+        milestone_docs.append(
+            {
+                "campaign_id": campaign_id,
+                "title": m["title"],
+                "description": m["description"],
+                "amount_sol": m["amount_sol"],
+                "due_date": m["expected_completion_date"],
+                "expected_completion_date": m["expected_completion_date"],
+                "order_index": index,
+                "status": "pending",
+                "evidence_urls": [],
+                "ai_decision": {},
+                "oracle_result": {},
+                "solana_tx": None,
+                "created_at": now,
+            }
+        )
+
+    milestone_result = await db.milestones.insert_many(milestone_docs)
+    campaign_milestones: list[dict] = []
+    for index, m in enumerate(milestone_inputs):
+        milestone_id = str(milestone_result.inserted_ids[index])
+        campaign_milestones.append(
+            {
+                "milestone_id": milestone_id,
+                "_id": milestone_id,
+                "order_index": index,
+                "title": m["title"],
+                "description": m["description"],
+                "amount_sol": m["amount_sol"],
+                "expected_completion_date": m["expected_completion_date"],
+                "due_date": m["expected_completion_date"],
+                "status": "pending",
+                "evidence_urls": [],
+                "created_at": now,
+            }
+        )
+
+    await db.campaigns.update_one(
+        {"_id": campaign_oid},
+        {"$set": {"milestones": campaign_milestones}},
+    )
+
     campaign["_id"] = campaign_id
+    campaign["milestones"] = campaign_milestones
 
     logger.info(
         "[CampaignCreate] created campaign_id=%s title=%s trust_score=%s",
@@ -732,13 +923,19 @@ async def get_campaign(campaign_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    milestones = []
-    async for m in db.milestones.find({"campaign_id": campaign_id}):
-        milestones.append(serialize(m))
-
     campaign = public_campaign(doc)
-    campaign["milestones"] = milestones
+    campaign["milestones"] = await _load_campaign_milestones(campaign_id, doc)
     return campaign
+
+
+@app.get("/api/campaigns/{campaign_id}/milestones")
+async def get_campaign_milestones(campaign_id: str):
+    if not ObjectId.is_valid(campaign_id):
+        raise HTTPException(status_code=400, detail="Invalid campaign ID")
+    campaign_doc = await db.campaigns.find_one({"_id": ObjectId(campaign_id)}, {"milestones": 1})
+    if not campaign_doc:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return await _load_campaign_milestones(campaign_id, campaign_doc)
 
 
 # ─── Donations ───────────────────────────────────────────────────────────────
@@ -800,7 +997,7 @@ async def create_donation(
 
     await db.campaigns.update_one(
         {"_id": ObjectId(body.campaign_id)},
-        {"$inc": {"total_raised_sol": body.amount_sol}},
+        {"$inc": {"total_raised_sol": body.amount_sol, "total_raised": body.amount_sol}},
     )
     return donation
 
@@ -1036,7 +1233,7 @@ async def create_donation_from_transfer(
 
     await db.campaigns.update_one(
         {"_id": ObjectId(body.campaign_id)},
-        {"$inc": {"total_raised_sol": body.amount_sol}},
+        {"$inc": {"total_raised_sol": body.amount_sol, "total_raised": body.amount_sol}},
     )
 
     logger.info(
@@ -1066,6 +1263,24 @@ async def create_milestone(
     campaign = await db.campaigns.find_one({"_id": ObjectId(campaign_id)})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    ngo_doc = await db.users.find_one({"auth0_sub": user.sub}, {"_id": 1})
+    if not ngo_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    if str(campaign.get("ngo_id")) != str(ngo_doc.get("_id")):
+        raise HTTPException(status_code=403, detail="You can only modify your own campaigns")
+
+    existing_milestones = await _load_campaign_milestones(campaign_id, campaign)
+    if len(existing_milestones) >= 5:
+        raise HTTPException(status_code=422, detail="Campaign cannot have more than 5 milestones")
+    order_index = len(existing_milestones)
+    current_total = _sum_amount(existing_milestones)
+    next_total = round(current_total + float(body.amount_sol or 0.0), 9)
+    total_budget_sol = float(campaign.get("total_budget_sol") or campaign.get("goal") or 0.0)
+    if total_budget_sol > 0 and next_total > total_budget_sol + FLOAT_EPSILON:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Milestone total ({next_total}) exceeds campaign total budget ({total_budget_sol})",
+        )
 
     milestone = {
         "campaign_id": campaign_id,
@@ -1073,6 +1288,8 @@ async def create_milestone(
         "description": body.description,
         "amount_sol": body.amount_sol,
         "due_date": body.due_date,
+        "expected_completion_date": body.due_date,
+        "order_index": order_index,
         "status": "pending",
         "evidence_urls": [],
         "ai_decision": {},
@@ -1082,6 +1299,26 @@ async def create_milestone(
     }
     result = await db.milestones.insert_one(milestone)
     milestone["_id"] = str(result.inserted_id)
+    await db.campaigns.update_one(
+        {"_id": ObjectId(campaign_id)},
+        {
+            "$push": {
+                "milestones": {
+                    "milestone_id": milestone["_id"],
+                    "_id": milestone["_id"],
+                    "order_index": order_index,
+                    "title": body.title,
+                    "description": body.description,
+                    "amount_sol": body.amount_sol,
+                    "expected_completion_date": body.due_date,
+                    "due_date": body.due_date,
+                    "status": "pending",
+                    "evidence_urls": [],
+                    "created_at": milestone["created_at"],
+                }
+            }
+        },
+    )
     return milestone
 
 
@@ -1097,7 +1334,60 @@ async def submit_evidence(
     milestone = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
     if not milestone:
         raise HTTPException(status_code=404, detail="Milestone not found")
+    campaign_id = str(milestone.get("campaign_id") or "")
+    if not ObjectId.is_valid(campaign_id):
+        raise HTTPException(status_code=422, detail="Milestone is missing a valid campaign_id")
 
+    campaign_doc = await db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+    if not campaign_doc:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign_doc.get("status") in ("failed", "frozen"):
+        raise HTTPException(status_code=422, detail="Campaign is frozen. Milestone submissions are disabled.")
+
+    ngo_doc = await db.users.find_one({"auth0_sub": user.sub}, {"_id": 1})
+    if not ngo_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    if str(campaign_doc.get("ngo_id")) != str(ngo_doc.get("_id")):
+        raise HTTPException(status_code=403, detail="You can only submit milestones for your own campaigns")
+
+    campaign_milestones = await _load_campaign_milestones(campaign_id, campaign_doc)
+    if not campaign_milestones:
+        raise HTTPException(status_code=422, detail="Campaign has no milestones to submit")
+
+    target_index = -1
+    for idx, m in enumerate(campaign_milestones):
+        item_id = str(m.get("milestone_id") or m.get("_id") or "")
+        if item_id == milestone_id:
+            target_index = idx
+            break
+    if target_index < 0:
+        raise HTTPException(status_code=422, detail="Milestone is not linked to this campaign")
+
+    target_status = str(campaign_milestones[target_index].get("status", "pending"))
+    if _is_milestone_approved(target_status):
+        raise HTTPException(status_code=422, detail="This milestone is already approved")
+    if target_status in ("submitted", "processing"):
+        raise HTTPException(status_code=422, detail="This milestone is already submitted")
+
+    for idx in range(target_index):
+        prior_status = str(campaign_milestones[idx].get("status", "pending"))
+        if not _is_milestone_approved(prior_status):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Submit milestones in sequence. Milestone {idx + 1} must be approved first.",
+            )
+
+    for idx, item in enumerate(campaign_milestones):
+        if idx == target_index:
+            continue
+        status_value = str(item.get("status", "pending"))
+        if status_value in ("submitted", "processing"):
+            raise HTTPException(
+                status_code=422,
+                detail="Only one milestone can be submitted at a time.",
+            )
+
+    submitted_at = datetime.now(timezone.utc)
     await db.milestones.update_one(
         {"_id": ObjectId(milestone_id)},
         {
@@ -1105,7 +1395,18 @@ async def submit_evidence(
                 "status": "submitted",
                 "description": body.description,
                 "evidence_urls": body.evidence_urls,
+                "submitted_at": submitted_at,
             }
+        },
+    )
+    await _sync_campaign_milestone(
+        campaign_id=campaign_id,
+        milestone_id=milestone_id,
+        update_fields={
+            "status": "submitted",
+            "description": body.description,
+            "evidence_urls": body.evidence_urls,
+            "submitted_at": submitted_at,
         },
     )
 
@@ -1134,11 +1435,30 @@ async def review_milestone(
     milestone = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
     if not milestone:
         raise HTTPException(status_code=404, detail="Milestone not found")
+    campaign_id = str(milestone.get("campaign_id") or "")
 
     new_status = "approved" if body.decision == "approve" else "rejected"
+    reviewed_at = datetime.now(timezone.utc)
     await db.milestones.update_one(
         {"_id": ObjectId(milestone_id)},
-        {"$set": {"status": new_status, "reviewer_notes": body.notes, "reviewed_by": user.sub}},
+        {
+            "$set": {
+                "status": new_status,
+                "reviewer_notes": body.notes,
+                "reviewed_by": user.sub,
+                "reviewed_at": reviewed_at,
+            }
+        },
+    )
+    await _sync_campaign_milestone(
+        campaign_id=campaign_id,
+        milestone_id=milestone_id,
+        update_fields={
+            "status": new_status,
+            "reviewer_notes": body.notes,
+            "reviewed_by": user.sub,
+            "reviewed_at": reviewed_at,
+        },
     )
     updated = await db.milestones.find_one({"_id": ObjectId(milestone_id)})
     return serialize(updated)

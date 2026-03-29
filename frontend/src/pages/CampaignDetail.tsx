@@ -113,9 +113,11 @@ export default function CampaignDetail() {
   }
 
   const raised = campaign.total_raised_sol
-  const goal = campaign.goal ?? 0
+  const goal = campaign.total_budget_sol ?? campaign.goal ?? 0
   const pct = goal > 0 ? Math.round((raised / goal) * 100) : 0
   const isDonor = user?.role === 'donor'
+  const budgetBreakdown = campaign.budget_breakdown ?? []
+  const slashHistory = campaign.slash_history ?? []
 
   return (
     <div className="cf-page max-w-6xl space-y-6 pb-10">
@@ -160,6 +162,20 @@ export default function CampaignDetail() {
           <GlassCard className="p-6 cf-animate-in cf-stagger-2">
             <h2 className="cf-section-title text-2xl text-white mb-3">Campaign Narrative</h2>
             <p className="text-sm text-white/62 leading-relaxed">{campaign.description}</p>
+
+            {budgetBreakdown.length > 0 && (
+              <div className="mt-5">
+                <h3 className="text-xs uppercase tracking-[0.14em] text-white/42 mb-3">Budget Breakdown</h3>
+                <div className="space-y-2">
+                  {budgetBreakdown.map((item, idx) => (
+                    <div key={`${item.name}-${idx}`} className="flex items-center justify-between rounded-xl border border-white/[0.1] bg-white/[0.03] px-3 py-2">
+                      <span className="text-sm text-white/78">{item.name}</span>
+                      <span className="text-sm text-white font-semibold">{Number(item.amount_sol).toFixed(2)} SOL</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </GlassCard>
 
           {milestones.length > 0 && (
@@ -263,6 +279,23 @@ export default function CampaignDetail() {
               </div>
             </div>
           </GlassCard>
+
+          {slashHistory.length > 0 && (
+            <GlassCard className="p-5 cf-animate-in cf-stagger-3">
+              <h3 className="cf-section-title text-xl text-white mb-3">Slash History</h3>
+              <div className="space-y-2.5">
+                {slashHistory.slice().reverse().map((event, idx) => (
+                  <div key={`${event.milestone_id}-${idx}`} className="rounded-xl border border-red-400/25 bg-red-500/10 p-3">
+                    <p className="text-xs text-red-200/90">
+                      Milestone {event.milestone_id.slice(0, 8)}... slashed by {event.percentage_slashed}%
+                    </p>
+                    <p className="text-[11px] text-red-100/75 mt-1">{event.reason}</p>
+                    <p className="text-[11px] text-red-100/60 mt-1">{event.timestamp?.slice(0, 19).replace('T', ' ')}</p>
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
 
           {activity.length > 0 && (
             <GlassCard className="p-5 cf-animate-in cf-stagger-4">

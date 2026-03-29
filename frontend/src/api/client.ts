@@ -58,6 +58,20 @@ export interface CampaignReview {
   reviewed_at?: string;
 }
 
+export interface BudgetBreakdownItem {
+  name: string;
+  amount_sol: number;
+}
+
+export interface SlashEvent {
+  milestone_id: string;
+  reason: string;
+  percentage_slashed: number;
+  timestamp: string;
+  next_milestone_id?: string | null;
+  slashed_amount_sol?: number;
+}
+
 export interface Campaign {
   _id: string;
   ngo_id: string;
@@ -67,6 +81,8 @@ export interface Campaign {
   category: string;
   image?: string;
   goal?: number;
+  total_budget_sol?: number;
+  total_raised?: number;
   total_raised_sol: number;
   vault_address?: string;
   status: string;
@@ -74,7 +90,9 @@ export interface Campaign {
   failure_count: number;
   donors_count?: number;
   created_at: string;
+  budget_breakdown?: BudgetBreakdownItem[];
   milestones?: Milestone[];
+  slash_history?: SlashEvent[];
   campaign_review?: CampaignReview;
 }
 
@@ -87,11 +105,14 @@ export function getWsBase(): string {
 
 export interface Milestone {
   _id: string;
+  milestone_id?: string;
   campaign_id: string;
   title: string;
   description: string;
   amount_sol: number;
   due_date: string;
+  expected_completion_date?: string;
+  order_index?: number;
   status: string;
   evidence_urls: string[];
   ai_decision: Record<string, unknown>;
@@ -141,6 +162,14 @@ export async function createCampaign(data: {
   title: string;
   description: string;
   category: string;
+  total_budget_sol: number;
+  budget_breakdown: BudgetBreakdownItem[];
+  milestones: Array<{
+    title: string;
+    description: string;
+    expected_completion_date: string;
+    amount_sol: number;
+  }>;
   vault_address?: string;
 }) {
   return apiFetch<Campaign>('/api/campaigns', {

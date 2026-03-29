@@ -61,7 +61,12 @@ class Campaign(BaseModel):
     title: str
     description: str
     category: str
+    total_budget_sol: float = 0.0
+    total_raised: float = 0.0
     total_raised_sol: float = 0.0
+    budget_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
+    milestones: List[Dict[str, Any]] = Field(default_factory=list)
+    slash_history: List[Dict[str, Any]] = Field(default_factory=list)
     vault_address: Optional[str] = None
     privy_vault_wallet_id: Optional[str] = None
     status: CampaignStatus = CampaignStatus.draft
@@ -123,10 +128,25 @@ class AgentAuditLog(BaseModel):
 
 
 # Request bodies
+class BudgetBreakdownItem(BaseModel):
+    name: str
+    amount_sol: float
+
+
+class CampaignMilestoneInput(BaseModel):
+    title: str
+    description: str
+    expected_completion_date: datetime
+    amount_sol: float
+
+
 class CreateCampaignRequest(BaseModel):
     title: str
     description: str
     category: str
+    total_budget_sol: float
+    budget_breakdown: List[BudgetBreakdownItem] = Field(default_factory=list)
+    milestones: List[CampaignMilestoneInput] = Field(default_factory=list)
     vault_address: Optional[str] = None
 
 

@@ -16,6 +16,7 @@ const STATUS_CONFIG: Record<string, { dot: string; text: string; bg: string; bor
   rejected: { dot: 'bg-red-400', text: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-400/20' },
   completed: { dot: 'bg-emerald-400', text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
   paused: { dot: 'bg-amber-400', text: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20' },
+  frozen: { dot: 'bg-red-400', text: 'text-red-300', bg: 'bg-red-500/10', border: 'border-red-500/35' },
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {

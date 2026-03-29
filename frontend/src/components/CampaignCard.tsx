@@ -16,7 +16,7 @@ interface CampaignCardProps {
 export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled = false }: CampaignCardProps) {
   const navigate = useNavigate()
   const raised = campaign.total_raised_sol
-  const goal = campaign.goal ?? 0
+  const goal = campaign.total_budget_sol ?? campaign.goal ?? 0
   const pct = goal > 0 ? Math.round((raised / goal) * 100) : 0
 
   return (

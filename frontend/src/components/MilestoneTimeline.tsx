@@ -10,6 +10,8 @@ const STATUS_ICON: Record<string, React.ElementType> = {
   released: Check,
   approved: Check,
   submitted: Upload,
+  processing: Upload,
+  pending: Clock,
   locked: Lock,
   rejected: X,
 }
@@ -18,6 +20,8 @@ const STATUS_STYLE: Record<string, string> = {
   released: 'bg-white text-black border-white shadow-[0_0_12px_rgba(255,255,255,0.4)]',
   approved: 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.4)]',
   submitted: 'bg-amber-500/20 text-amber-400 border-amber-400/50 animate-pulse',
+  processing: 'bg-amber-500/20 text-amber-400 border-amber-400/50 animate-pulse',
+  pending: 'bg-white/5 text-white/60 border-white/20',
   locked: 'bg-white/5 text-white/30 border-white/10',
   rejected: 'bg-red-500/20 text-red-400 border-red-400/50',
 }
@@ -26,6 +30,8 @@ const LINE_STYLE: Record<string, string> = {
   released: 'bg-white',
   approved: 'bg-emerald-500',
   submitted: 'bg-amber-400/50',
+  processing: 'bg-amber-400/50',
+  pending: 'bg-white/20',
   locked: 'bg-white/10',
   rejected: 'bg-red-500/30',
 }
