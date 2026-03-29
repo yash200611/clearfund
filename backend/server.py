@@ -385,39 +385,56 @@ class UpdatePasswordRequest(_BaseModel):
 class UpdateRoleRequest(_BaseModel):
     role: str
 
+async def _provision_wallet(auth0_sub: str, role: str) -> None:
+    """Background task: create Privy wallet + airdrop. Non-blocking."""
+    try:
+        privy = PrivyClient()
+        wallet = await privy.create_embedded_wallet(auth0_sub)
+        update: dict = {
+            "privy_wallet_id": wallet["wallet_id"],
+            "wallet_address": wallet["address"],
+        }
+        if role == "donor":
+            try:
+                await privy.request_airdrop(wallet["address"], sol=5.0)
+                update["wallet_balance_sol"] = 5.0
+                print(f"[Wallet] Airdropped 5 SOL to {wallet['address']}")
+            except Exception as e:
+                print(f"[Wallet] Airdrop failed (non-fatal): {e}")
+        db_bg = _get_bg_db()
+        await db_bg.users.update_one({"auth0_sub": auth0_sub}, {"$set": update})
+        print(f"[Wallet] Provisioned {role} wallet: {wallet['address']}")
+    except Exception as e:
+        print(f"[Wallet] Provisioning failed (non-fatal): {e}")
+
+
+def _get_bg_db():
+    """Separate client for background tasks (can't use request-scoped db)."""
+    from motor.motor_asyncio import AsyncIOMotorClient as _Client
+    c = _Client(MONGO_URL, tls=True, tlsAllowInvalidCertificates=False, serverSelectionTimeoutMS=30000)
+    return c[DB_NAME]
+
+
 @app.put("/api/users/me/role")
-async def update_role(body: UpdateRoleRequest, user: TokenData = Depends(get_current_user)):
+async def update_role(
+    body: UpdateRoleRequest,
+    background_tasks: BackgroundTasks,
+    user: TokenData = Depends(get_current_user),
+):
     if body.role not in ("donor", "ngo"):
         raise HTTPException(status_code=400, detail="Role must be 'donor' or 'ngo'")
 
-    existing = await db.users.find_one({"auth0_sub": user.sub})
-    update: dict = {"role": body.role}
-
-    # Only create wallet if user doesn't have one yet
-    if existing and not existing.get("wallet_address"):
-        try:
-            privy = PrivyClient()
-            wallet = await privy.create_embedded_wallet(user.sub)
-            update["privy_wallet_id"] = wallet["wallet_id"]
-            update["wallet_address"] = wallet["address"]
-
-            # Donors get 5 devnet SOL so they can demo donations immediately
-            if body.role == "donor":
-                try:
-                    await privy.request_airdrop(wallet["address"], sol=5.0)
-                    update["wallet_balance_sol"] = 5.0
-                    print(f"[Wallet] Airdropped 5 SOL to donor {wallet['address']}")
-                except Exception as e:
-                    print(f"[Wallet] Airdrop failed (non-fatal): {e}")
-
-            print(f"[Wallet] Created {body.role} wallet: {wallet['address']}")
-        except Exception as e:
-            print(f"[Wallet] Wallet creation failed (non-fatal): {e}")
-
+    # Save role immediately — do NOT wait for wallet creation
     await db.users.update_one(
         {"auth0_sub": user.sub},
-        {"$set": update},
+        {"$set": {"role": body.role}},
     )
+
+    # Provision wallet in the background after responding
+    existing = await db.users.find_one({"auth0_sub": user.sub})
+    if existing and not existing.get("wallet_address"):
+        background_tasks.add_task(_provision_wallet, user.sub, body.role)
+
     doc = await db.users.find_one({"auth0_sub": user.sub})
     return serialize(doc)
 
