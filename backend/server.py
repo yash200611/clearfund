@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import time
@@ -15,6 +16,13 @@ from fastapi.responses import JSONResponse
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
+
+from solana.rpc.api import Client as SolanaClient
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+from solders.system_program import transfer as sol_transfer, TransferParams
+from solders.transaction import Transaction as SoldersTransaction
+from solders.message import Message as SoldersMessage
 
 from auth import (
     AUTH0_AUDIENCE,
@@ -57,6 +65,25 @@ DB_NAME = os.getenv("DB_NAME", "clearfund")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 SOLANA_NETWORK = os.getenv("SOLANA_NETWORK", "devnet")
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", f"https://api.{SOLANA_NETWORK}.solana.com")
+SOLANA_LOCAL_KEYPAIR_PATH = os.getenv("SOLANA_LOCAL_KEYPAIR_PATH", os.path.expanduser("~/.config/solana/id.json"))
+
+
+def _localnet_sign_and_send(from_address: str, to_address: str, amount_sol: float) -> str:
+    """Sign and send a SOL transfer using the local keypair (localnet only)."""
+    with open(SOLANA_LOCAL_KEYPAIR_PATH) as f:
+        key_bytes = bytes(json.load(f))
+    kp = Keypair.from_bytes(key_bytes)
+    client = SolanaClient(SOLANA_RPC_URL)
+    blockhash_resp = client.get_latest_blockhash()
+    recent_blockhash = blockhash_resp.value.blockhash
+    from_pubkey = kp.pubkey()
+    to_pubkey = Pubkey.from_string(to_address)
+    lamports = int(amount_sol * 1_000_000_000)
+    ix = sol_transfer(TransferParams(from_pubkey=from_pubkey, to_pubkey=to_pubkey, lamports=lamports))
+    msg = SoldersMessage.new_with_blockhash(instructions=[ix], payer=from_pubkey, blockhash=recent_blockhash)
+    tx = SoldersTransaction([kp], msg, recent_blockhash)
+    result = client.send_transaction(tx)
+    return str(result.value)
 
 LAMPORTS_PER_SOL = 1_000_000_000
 EXPLORER_BASE = "https://explorer.solana.com/tx"
@@ -897,7 +924,12 @@ async def sign_privy_transfer(
         )
 
     try:
-        signature = await privy.sign_and_send_transaction(privy_wallet_id, tx_b64)
+        if SOLANA_NETWORK.lower() == "localnet":
+            signature = await asyncio.to_thread(
+                _localnet_sign_and_send, donor_wallet, vault_address, body.amount_sol
+            )
+        else:
+            signature = await privy.sign_and_send_transaction(privy_wallet_id, tx_b64)
     except httpx.TimeoutException:
         logger.warning(
             "[PrivyTransfer] signing timeout donor=%s campaign_id=%s",
