@@ -1052,19 +1052,19 @@ class PrivyTransferSignRequest(BaseModel):
 @app.post("/api/wallets/privy/transfer-sign")
 async def sign_privy_transfer(
     body: PrivyTransferSignRequest,
-    user: TokenData = Depends(require_donor_role),
+    user: TokenData = Depends(resolve_app_user),
 ):
     donor_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not donor_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
     donor_wallet = donor_doc.get("wallet_address")
-    privy_wallet_id = donor_doc.get("privy_wallet_id")
-    if not donor_wallet or not privy_wallet_id:
+    if not donor_wallet:
         raise HTTPException(
             status_code=422,
-            detail="Privy wallet not provisioned for this donor account",
+            detail="No wallet address found for this donor account",
         )
+    privy_wallet_id = donor_doc.get("privy_wallet_id", "")
 
     if body.amount_sol <= 0:
         raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
@@ -1081,69 +1081,41 @@ async def sign_privy_transfer(
     if not vault_address:
         raise HTTPException(status_code=422, detail="Campaign has no vault_address")
 
-    # Leave room for network fee + minor rent fluctuations.
-    fee_buffer_sol = float(os.getenv("DONOR_TRANSFER_FEE_BUFFER_SOL", "0.005"))
-    required_sol = body.amount_sol + max(0.001, fee_buffer_sol)
-    current_balance: Optional[float] = None
-
     is_localnet = SOLANA_NETWORK.lower() == "localnet"
 
-    try:
-        if is_localnet:
+    # On localnet, auto-airdrop if needed; on other networks, just check balance.
+    if is_localnet:
+        try:
             current_balance = await asyncio.to_thread(
                 localnet_wallet.get_balance, donor_wallet, SOLANA_RPC_URL,
             )
-        else:
-            privy = PrivyClient()
-            current_balance = await privy.get_wallet_balance(donor_wallet)
-    except Exception as e:
-        logger.warning(
-            "[PrivyTransfer] balance check failed donor_wallet=%s error=%s",
-            donor_wallet,
-            str(e),
-        )
-
-    if current_balance is not None and current_balance < required_sol:
-        attempted_airdrop = False
-        if is_localnet or SOLANA_NETWORK.lower() in ("devnet", "testnet"):
-            topup = max(1.0, round(required_sol - current_balance + 0.25, 3))
-            topup = min(topup, 10.0)
-            try:
-                if is_localnet:
-                    airdrop_sig = await asyncio.to_thread(
-                        localnet_wallet.airdrop, donor_wallet, topup, SOLANA_RPC_URL,
-                    )
-                else:
-                    airdrop_sig = await privy.request_airdrop(donor_wallet, sol=topup)
-                attempted_airdrop = True
-                logger.info(
-                    "[PrivyTransfer] auto-airdrop requested donor_wallet=%s amount_sol=%.3f sig=%s",
-                    donor_wallet,
-                    topup,
-                    airdrop_sig,
+            required_sol = body.amount_sol + 0.005
+            if current_balance < required_sol:
+                topup = max(1.0, round(required_sol - current_balance + 0.25, 3))
+                await asyncio.to_thread(
+                    localnet_wallet.airdrop, donor_wallet, min(topup, 10.0), SOLANA_RPC_URL,
                 )
-                await asyncio.sleep(0.5)
-                if is_localnet:
-                    current_balance = await asyncio.to_thread(
-                        localnet_wallet.get_balance, donor_wallet, SOLANA_RPC_URL,
-                    )
-                else:
-                    current_balance = await privy.get_wallet_balance(donor_wallet)
-            except Exception as e:
-                logger.warning(
-                    "[PrivyTransfer] auto-airdrop failed donor_wallet=%s error=%s",
-                    donor_wallet,
-                    str(e),
+                logger.info("[Transfer] localnet auto-airdrop donor_wallet=%s topup=%.3f", donor_wallet, topup)
+        except Exception as e:
+            logger.warning("[Transfer] localnet balance/airdrop failed donor_wallet=%s error=%s", donor_wallet, str(e))
+    else:
+        fee_buffer_sol = float(os.getenv("DONOR_TRANSFER_FEE_BUFFER_SOL", "0.005"))
+        required_sol = body.amount_sol + max(0.001, fee_buffer_sol)
+        current_balance: Optional[float] = None
+        try:
+            async with httpx.AsyncClient(timeout=10) as _c:
+                _resp = await _c.post(
+                    SOLANA_RPC_URL,
+                    json={"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [donor_wallet]},
                 )
+                current_balance = _resp.json()["result"]["value"] / 1_000_000_000
+        except Exception as e:
+            logger.warning("[Transfer] balance check failed donor_wallet=%s error=%s", donor_wallet, str(e))
 
         if current_balance is not None and current_balance < required_sol:
-            suffix = " (auto-airdrop attempted but balance is still low)." if attempted_airdrop else "."
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    f"Insufficient SOL in donor wallet. "
-                    f"balance={current_balance:.6f} SOL, required~={required_sol:.6f} SOL{suffix}"
-                ),
+                detail=f"Insufficient SOL in donor wallet. balance={current_balance:.6f} SOL, required~={required_sol:.6f} SOL",
             )
 
     try:
@@ -1197,7 +1169,7 @@ async def sign_privy_transfer(
             str(donor_doc.get("_id")),
             body.campaign_id,
         )
-        raise HTTPException(status_code=504, detail="Privy signing timed out")
+        raise HTTPException(status_code=504, detail="Transaction signing timed out")
     except Exception as e:
         err_lower = str(e).lower()
         if (
@@ -1210,13 +1182,12 @@ async def sign_privy_transfer(
                 detail="Insufficient SOL balance in donor wallet for transfer + fees",
             )
         logger.exception(
-            "[PrivyTransfer] signing failed donor=%s campaign_id=%s wallet_id=%s error=%s",
+            "[Transfer] signing failed donor=%s campaign_id=%s error=%s",
             str(donor_doc.get("_id")),
             body.campaign_id,
-            privy_wallet_id,
             str(e),
         )
-        raise HTTPException(status_code=503, detail="Unable to sign transfer with Privy wallet")
+        raise HTTPException(status_code=503, detail="Unable to sign transfer transaction")
 
     logger.info(
         "[PrivyTransfer] signed donor_id=%s campaign_id=%s donor_wallet=%s vault=%s amount_sol=%.9f tx=%s",
@@ -1238,7 +1209,7 @@ async def sign_privy_transfer(
 @app.post("/api/donations/transfer", status_code=status.HTTP_201_CREATED)
 async def create_donation_from_transfer(
     body: CreateDonationTransferRequest,
-    user: TokenData = Depends(require_donor_role),
+    user: TokenData = Depends(resolve_app_user),
 ):
     donor_doc = await db.users.find_one({"auth0_sub": user.sub})
     if not donor_doc:

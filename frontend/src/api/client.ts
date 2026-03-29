@@ -231,7 +231,7 @@ export interface DonateTransferResult extends Donation {
   explorer_url: string;
 }
 
-export interface PrivyTransferSignResult {
+export interface TransferSignResult {
   signature: string;
   wallet_address: string;
   explorer_url: string;
@@ -249,11 +249,11 @@ export async function donateTransfer(data: {
   });
 }
 
-export async function signPrivyTransfer(data: {
+export async function signTransfer(data: {
   campaign_id: string;
   amount_sol: number;
-}): Promise<PrivyTransferSignResult> {
-  return apiFetch<PrivyTransferSignResult>('/api/wallets/privy/transfer-sign', {
+}): Promise<TransferSignResult> {
+  return apiFetch<TransferSignResult>('/api/wallets/privy/transfer-sign', {
     method: 'POST',
     body: JSON.stringify(data),
   });
