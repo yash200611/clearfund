@@ -50,6 +50,14 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface CampaignReview {
+  recommendation: string;
+  confidence_score: number;
+  reasoning: string;
+  risk_flags: string[];
+  reviewed_at?: string;
+}
+
 export interface Campaign {
   _id: string;
   ngo_id: string;
@@ -67,6 +75,14 @@ export interface Campaign {
   donors_count?: number;
   created_at: string;
   milestones?: Milestone[];
+  campaign_review?: CampaignReview;
+}
+
+export function getWsBase(): string {
+  const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  if (configured) return configured.replace(/^http/, 'ws');
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${window.location.host}`;
 }
 
 export interface Milestone {

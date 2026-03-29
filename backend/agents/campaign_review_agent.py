@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL_NAME = os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-pro")
+MODEL_NAME = os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-flash")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)

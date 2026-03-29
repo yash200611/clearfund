@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
-import { getCampaigns, createCampaign } from '@/api/client'
+import { getCampaigns, createCampaign, getWsBase } from '@/api/client'
 import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const TABS = ['My Campaigns', 'New Campaign']
+
+interface ReviewState {
+  campaignId: string
+  title: string
+  phase: 'started' | 'completed'
+  recommendation?: string
+  status?: string
+  trust_score?: number
+  reasoning?: string
+  risk_flags?: string[]
+}
 
 export default function NGOStudio() {
   const { user } = useAuth()
@@ -18,6 +29,8 @@ export default function NGOStudio() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare' })
+  const [review, setReview] = useState<ReviewState | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   const loadMyCampaigns = () => {
     getCampaigns()
@@ -27,19 +40,56 @@ export default function NGOStudio() {
 
   useEffect(() => { loadMyCampaigns() }, [user?.id])
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Open global WS feed to catch campaign_review events
+  useEffect(() => {
+    const wsBase = getWsBase()
+    const ws = new WebSocket(`${wsBase}/api/ws/agents`)
+    wsRef.current = ws
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data)
+        if (msg.event_type === 'campaign_review_started') {
+          setReview(prev =>
+            prev && prev.campaignId === msg.payload.campaign_id
+              ? { ...prev, phase: 'started' }
+              : prev
+          )
+        }
+        if (msg.event_type === 'campaign_review_completed') {
+          const p = msg.payload
+          setReview(prev =>
+            prev && prev.campaignId === p.campaign_id
+              ? {
+                  ...prev,
+                  phase: 'completed',
+                  recommendation: p.recommendation,
+                  status: p.status,
+                  trust_score: p.trust_score,
+                  reasoning: p.reasoning,
+                  risk_flags: p.risk_flags,
+                }
+              : prev
+          )
+          loadMyCampaigns()
+        }
+      } catch {}
+    }
+
+    return () => ws.close()
+  }, [])
+
+  const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setSaving(true)
     try {
-      await createCampaign({
+      const campaign = await createCampaign({
         title: form.title,
         description: form.description,
         category: form.category,
       })
-      toast.success('Campaign launched! It will go live after review.')
+      setReview({ campaignId: campaign._id, title: form.title, phase: 'started' })
       setForm({ title: '', description: '', category: 'Healthcare' })
-      setTab(0)
-      loadMyCampaigns()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create campaign. Please try again.'
       toast.error(msg)
@@ -48,10 +98,97 @@ export default function NGOStudio() {
     }
   }
 
+  const closeReview = () => {
+    setReview(null)
+    setTab(0)
+  }
+
   const inputClass = "w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none text-sm transition-all"
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
+
+      {/* Live Review Overlay */}
+      {review && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <GlassCard className="w-full max-w-lg p-8 space-y-5">
+            <div className="flex items-center gap-3">
+              {review.phase === 'started' ? (
+                <Loader2 className="w-6 h-6 text-amber-400 animate-spin flex-shrink-0" />
+              ) : review.status === 'active' ? (
+                <CheckCircle2 className="w-6 h-6 text-emerald-400 flex-shrink-0" />
+              ) : review.status === 'rejected' ? (
+                <XCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              ) : (
+                <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0" />
+              )}
+              <div>
+                <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">
+                  {review.phase === 'started' ? 'Gemini is reviewing your campaign...' : 'Review Complete'}
+                </p>
+                <p className="text-white font-semibold text-sm mt-0.5 line-clamp-1">{review.title}</p>
+              </div>
+            </div>
+
+            {review.phase === 'started' && (
+              <div className="space-y-2">
+                <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-400/70 rounded-full animate-pulse w-2/3" />
+                </div>
+                <p className="text-xs text-white/40">Analyzing description, category, and risk signals…</p>
+              </div>
+            )}
+
+            {review.phase === 'completed' && (
+              <div className="space-y-4">
+                {/* Status + Score */}
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    'px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest',
+                    review.status === 'active' ? 'bg-emerald-400/15 text-emerald-400' :
+                    review.status === 'rejected' ? 'bg-red-400/15 text-red-400' :
+                    'bg-amber-400/15 text-amber-400'
+                  )}>
+                    {review.status === 'active' ? 'Approved — Live' :
+                     review.status === 'rejected' ? 'Rejected' : 'Under Review'}
+                  </span>
+                  {review.trust_score !== undefined && (
+                    <span className="text-xs text-white/50">
+                      Trust score: <span className="text-white font-semibold">{review.trust_score}%</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Reasoning */}
+                {review.reasoning && (
+                  <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-4">
+                    <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-2">Gemini's Reasoning</p>
+                    <p className="text-sm text-white/80 leading-relaxed">{review.reasoning}</p>
+                  </div>
+                )}
+
+                {/* Risk flags */}
+                {review.risk_flags && review.risk_flags.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">Risk Flags</p>
+                    {review.risk_flags.map((flag, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs text-amber-400/80">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                        {flag.replace(/_/g, ' ')}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <LiquidButton onClick={closeReview} className="w-full">
+                  View My Campaigns
+                </LiquidButton>
+              </div>
+            )}
+          </GlassCard>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white mb-1">NGO Studio</h2>
@@ -101,17 +238,14 @@ export default function NGOStudio() {
                 placeholder="Describe your campaign, goals, and impact..." rows={4}
                 className={cn(inputClass, 'resize-none')} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Category</label>
-                <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
-                  className={inputClass}>
-                  {['Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate', 'Food Security'].map(c => (
-                    <option key={c} value={c} className="bg-neutral-900">{c}</option>
-                  ))}
-                </select>
-              </div>
-
+            <div>
+              <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Category</label>
+              <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
+                className={inputClass}>
+                {['Healthcare', 'Education', 'Water & Sanitation', 'Shelter & Safety', 'Climate', 'Food Security'].map(c => (
+                  <option key={c} value={c} className="bg-neutral-900">{c}</option>
+                ))}
+              </select>
             </div>
             <div className="flex gap-3 pt-2">
               <LiquidButton type="submit" disabled={saving}>

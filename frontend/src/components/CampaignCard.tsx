@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Users, Clock } from 'lucide-react'
+import { Users, Clock, Loader2 } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
 import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
@@ -37,9 +37,14 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-        <div className="absolute top-3 left-3 flex gap-2 flex-wrap">
+        <div className="absolute top-3 left-3 flex gap-2 flex-wrap items-center">
+          {campaign.status === 'under_review' && (
+            <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+          )}
           <StatusBadge status={campaign.status} />
-          <TrustBadge score={campaign.trust_score} size="sm" />
+          {campaign.status !== 'under_review' && (
+            <TrustBadge score={campaign.trust_score} size="sm" />
+          )}
         </div>
         <div className="absolute top-3 right-3">
           <RiskBadge failureCount={campaign.failure_count} />

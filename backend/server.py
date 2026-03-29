@@ -269,10 +269,12 @@ def _optional_user_from_request(request: Request) -> Optional[TokenData]:
 async def _run_campaign_intake_review(campaign_id: str) -> None:
     """
     Background task: send campaign to Gemini, then update status.
-    - approve    -> active
-    - reject     -> rejected
-    - needs_info -> under_review
+    - approve + trust_score >= 60 + vault_address present -> active
+    - reject                                               -> rejected
+    - anything else                                        -> under_review
     """
+    MIN_TRUST_SCORE = 60
+
     try:
         if not ObjectId.is_valid(campaign_id):
             logger.warning("[CampaignReview] invalid campaign_id=%s", campaign_id)
@@ -285,27 +287,43 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
 
         campaign = serialize(dict(campaign_doc))
         logger.info("[CampaignReview] started campaign_id=%s title=%s", campaign_id, campaign.get("title"))
+
+        await manager.broadcast_global(
+            event_type="campaign_review_started",
+            milestone_id="",
+            payload={"campaign_id": campaign_id, "title": campaign.get("title", "")},
+        )
+
         result = await run_campaign_review_agent(campaign)
 
         recommendation = str(result.get("recommendation", "needs_info"))
-        new_status = "under_review"
-        if recommendation == "approve":
-            new_status = "active"
-        elif recommendation == "reject":
-            new_status = "rejected"
-
         trust_score = int(result.get("trust_score", campaign.get("trust_score", 0) or 0))
         trust_score = max(0, min(100, trust_score))
+        vault_address = campaign.get("vault_address", "")
+
+        # Campaign only goes live if Gemini approves, score is sufficient, and vault exists
+        if recommendation == "reject":
+            new_status = "rejected"
+        elif recommendation == "approve" and trust_score >= MIN_TRUST_SCORE and vault_address:
+            new_status = "active"
+        else:
+            new_status = "under_review"
+
+        risk_flags = result.get("risk_flags", [])
+        if not vault_address:
+            risk_flags = list(risk_flags) + ["no_vault_address"]
+        if trust_score < MIN_TRUST_SCORE and recommendation == "approve":
+            risk_flags = list(risk_flags) + [f"trust_score_below_threshold_{trust_score}"]
 
         review_update = {
             "status": new_status,
             "trust_score": trust_score,
             "campaign_review": {
-                "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-pro"),
+                "model": os.getenv("GEMINI_CAMPAIGN_MODEL", "gemini-2.5-flash"),
                 "recommendation": recommendation,
                 "confidence_score": int(result.get("confidence_score", 0)),
                 "reasoning": str(result.get("reasoning", "")),
-                "risk_flags": result.get("risk_flags", []),
+                "risk_flags": risk_flags,
                 "reviewed_at": datetime.now(timezone.utc),
             },
         }
@@ -313,10 +331,22 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
         await db.campaigns.update_one({"_id": ObjectId(campaign_id)}, {"$set": review_update})
         logger.info(
             "[CampaignReview] complete campaign_id=%s recommendation=%s status=%s trust_score=%s",
-            campaign_id,
-            recommendation,
-            new_status,
-            trust_score,
+            campaign_id, recommendation, new_status, trust_score,
+        )
+
+        await manager.broadcast_global(
+            event_type="campaign_review_completed",
+            milestone_id="",
+            payload={
+                "campaign_id": campaign_id,
+                "title": campaign.get("title", ""),
+                "recommendation": recommendation,
+                "status": new_status,
+                "trust_score": trust_score,
+                "confidence_score": int(result.get("confidence_score", 0)),
+                "reasoning": str(result.get("reasoning", "")),
+                "risk_flags": risk_flags,
+            },
         )
 
         await db.agent_audit_logs.insert_one({
@@ -328,7 +358,7 @@ async def _run_campaign_intake_review(campaign_id: str) -> None:
                 "status": new_status,
                 "confidence_score": int(result.get("confidence_score", 0)),
                 "reasoning": str(result.get("reasoning", "")),
-                "risk_flags": result.get("risk_flags", []),
+                "risk_flags": risk_flags,
             },
             "created_at": datetime.now(timezone.utc),
         })
