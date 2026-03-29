@@ -9,6 +9,12 @@ const RPC_URL =
 
 const LAMPORTS_PER_SOL = 1_000_000_000
 
+declare global {
+  interface Window {
+    solflare?: { isConnected?: boolean }
+  }
+}
+
 interface SolanaTransferResult {
   signature: string
   walletAddress: string
