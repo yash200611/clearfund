@@ -5,12 +5,14 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { MetalButton } from '@/components/ui/metal-button'
 import { CampaignCard } from '@/components/CampaignCard'
-import { getCampaigns, createCampaign, getWsBase } from '@/api/client'
+import { getCampaigns, getCampaignById, createCampaign } from '@/api/client'
 import type { Campaign } from '@/api/client'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const TABS = ['My Campaigns', 'New Campaign']
+const POLL_INTERVAL_MS = 2500
+const MAX_POLLS = 40 // ~100 seconds max
 
 interface ReviewState {
   campaignId: string
@@ -30,7 +32,8 @@ export default function NGOStudio() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ title: '', description: '', category: 'Healthcare' })
   const [review, setReview] = useState<ReviewState | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollCountRef = useRef(0)
 
   const loadMyCampaigns = () => {
     getCampaigns()
@@ -40,44 +43,42 @@ export default function NGOStudio() {
 
   useEffect(() => { loadMyCampaigns() }, [user?.id])
 
-  // Open global WS feed to catch campaign_review events
-  useEffect(() => {
-    const wsBase = getWsBase()
-    const ws = new WebSocket(`${wsBase}/api/ws/agents`)
-    wsRef.current = ws
+  // Poll campaign status until review is done
+  const startPolling = (campaignId: string) => {
+    pollCountRef.current = 0
+    if (pollRef.current) clearInterval(pollRef.current)
 
-    ws.onmessage = (evt) => {
+    pollRef.current = setInterval(async () => {
+      pollCountRef.current += 1
       try {
-        const msg = JSON.parse(evt.data)
-        if (msg.event_type === 'campaign_review_started') {
-          setReview(prev =>
-            prev && prev.campaignId === msg.payload.campaign_id
-              ? { ...prev, phase: 'started' }
-              : prev
-          )
-        }
-        if (msg.event_type === 'campaign_review_completed') {
-          const p = msg.payload
-          setReview(prev =>
-            prev && prev.campaignId === p.campaign_id
-              ? {
-                  ...prev,
-                  phase: 'completed',
-                  recommendation: p.recommendation,
-                  status: p.status,
-                  trust_score: p.trust_score,
-                  reasoning: p.reasoning,
-                  risk_flags: p.risk_flags,
-                }
-              : prev
-          )
+        const c = await getCampaignById(campaignId)
+        if (c.status !== 'under_review') {
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          setReview(prev => prev ? {
+            ...prev,
+            phase: 'completed',
+            recommendation: c.campaign_review?.recommendation,
+            status: c.status,
+            trust_score: c.trust_score,
+            reasoning: c.campaign_review?.reasoning,
+            risk_flags: c.campaign_review?.risk_flags,
+          } : prev)
           loadMyCampaigns()
         }
       } catch {}
-    }
 
-    return () => ws.close()
-  }, [])
+      if (pollCountRef.current >= MAX_POLLS) {
+        clearInterval(pollRef.current!)
+        pollRef.current = null
+        // Timed out — show what we have
+        setReview(prev => prev ? { ...prev, phase: 'completed', status: 'under_review' } : prev)
+        loadMyCampaigns()
+      }
+    }, POLL_INTERVAL_MS)
+  }
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -88,8 +89,10 @@ export default function NGOStudio() {
         description: form.description,
         category: form.category,
       })
-      setReview({ campaignId: campaign._id, title: form.title, phase: 'started' })
+      const title = form.title
       setForm({ title: '', description: '', category: 'Healthcare' })
+      setReview({ campaignId: campaign._id, title, phase: 'started' })
+      startPolling(campaign._id)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create campaign. Please try again.'
       toast.error(msg)
