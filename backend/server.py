@@ -1,13 +1,17 @@
 import asyncio
 import json
 import os
+import time
+import uuid
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth import TokenData, decode_token, get_current_user, require_donor, require_ngo, require_verifier
@@ -28,6 +32,13 @@ from models import (
 )
 
 load_dotenv()
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("clearfund.server")
 
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "clearfund")
@@ -50,6 +61,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def request_log_middleware(request: Request, call_next):
+    req_id = request.headers.get("x-request-id") or str(uuid.uuid4())[:8]
+    method = request.method
+    path = request.url.path
+    query = request.url.query
+    start = time.perf_counter()
+    client_host = request.client.host if request.client else "-"
+
+    logger.info(
+        "[REQ %s] -> %s %s%s client=%s",
+        req_id,
+        method,
+        path,
+        f"?{query}" if query else "",
+        client_host,
+    )
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "[REQ %s] <- %s %s status=%s dur_ms=%.2f",
+            req_id,
+            method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+        response.headers["x-request-id"] = req_id
+        return response
+    except Exception:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.exception(
+            "[REQ %s] !! unhandled error %s %s after %.2fms",
+            req_id,
+            method,
+            path,
+            elapsed_ms,
+        )
+        raise
+
+
+@app.exception_handler(HTTPException)
+async def log_http_exception(request: Request, exc: HTTPException):
+    logger.warning(
+        "[HTTPException] %s %s status=%s detail=%s",
+        request.method,
+        request.url.path,
+        exc.status_code,
+        exc.detail,
+    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def log_unhandled_exception(request: Request, exc: Exception):
+    logger.exception(
+        "[UnhandledException] %s %s error=%s",
+        request.method,
+        request.url.path,
+        str(exc),
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
+
 # DB client
 mongo_client: AsyncIOMotorClient = None
 db = None
@@ -59,6 +136,13 @@ lava_client: Optional[LavaClient] = None
 @app.on_event("startup")
 async def startup():
     global mongo_client, db, lava_client
+    logger.info(
+        "[Startup] Booting API DB_NAME=%s FRONTEND_URL=%s LOG_LEVEL=%s",
+        DB_NAME,
+        FRONTEND_URL,
+        LOG_LEVEL,
+    )
+    logger.info("[Startup] Allowed CORS origins=%s", _allowed_origins)
     mongo_client = AsyncIOMotorClient(
         MONGO_URL,
         tls=True,
@@ -67,14 +151,21 @@ async def startup():
     )
     db = mongo_client[DB_NAME]
     try:
+        await db.command("ping")
+        logger.info("[Startup] Mongo ping OK")
+    except Exception as e:
+        logger.exception("[Startup] Mongo ping failed error=%s", str(e))
+    try:
         lava_client = LavaClient()
+        logger.info("[Startup] Lava client initialized")
     except RuntimeError as e:
-        print(f"[Startup] WARNING: {e} — Lava analytics disabled.")
+        logger.warning("[Startup] Lava disabled: %s", str(e))
 
 
 @app.on_event("shutdown")
 async def shutdown():
     if mongo_client:
+        logger.info("[Shutdown] Closing Mongo client")
         mongo_client.close()
 
 
@@ -117,8 +208,10 @@ async def health():
 
 @app.get("/api/auth/me")
 async def get_me(user: TokenData = Depends(get_current_user)):
+    logger.info("[AuthMe] sub=%s email=%s role_claim=%s", user.sub, user.email, user.role)
     doc = await db.users.find_one({"auth0_sub": user.sub})
     if not doc:
+        logger.info("[AuthMe] user not found, creating user sub=%s", user.sub)
         new_user = {
             "auth0_sub": user.sub,
             "email": user.email,
@@ -129,7 +222,14 @@ async def get_me(user: TokenData = Depends(get_current_user)):
         }
         result = await db.users.insert_one(new_user)
         new_user["_id"] = str(result.inserted_id)
+        logger.info("[AuthMe] user created id=%s sub=%s", new_user["_id"], user.sub)
         return new_user
+    logger.info(
+        "[AuthMe] existing user id=%s role=%s has_wallet=%s",
+        str(doc.get("_id")),
+        doc.get("role"),
+        bool(doc.get("wallet_address")),
+    )
     return serialize(doc)
 
 
@@ -388,6 +488,7 @@ class UpdateRoleRequest(_BaseModel):
 async def _provision_wallet(auth0_sub: str, role: str) -> None:
     """Background task: create Privy wallet + airdrop. Non-blocking."""
     try:
+        logger.info("[Wallet] provisioning started sub=%s role=%s", auth0_sub, role)
         privy = PrivyClient()
         wallet = await privy.create_embedded_wallet(auth0_sub)
         update: dict = {
@@ -398,14 +499,14 @@ async def _provision_wallet(auth0_sub: str, role: str) -> None:
             try:
                 await privy.request_airdrop(wallet["address"], sol=5.0)
                 update["wallet_balance_sol"] = 5.0
-                print(f"[Wallet] Airdropped 5 SOL to {wallet['address']}")
+                logger.info("[Wallet] airdrop success address=%s amount_sol=5.0", wallet["address"])
             except Exception as e:
-                print(f"[Wallet] Airdrop failed (non-fatal): {e}")
+                logger.warning("[Wallet] airdrop failed (non-fatal) address=%s error=%s", wallet["address"], str(e))
         db_bg = _get_bg_db()
         await db_bg.users.update_one({"auth0_sub": auth0_sub}, {"$set": update})
-        print(f"[Wallet] Provisioned {role} wallet: {wallet['address']}")
+        logger.info("[Wallet] provisioning finished sub=%s role=%s address=%s", auth0_sub, role, wallet["address"])
     except Exception as e:
-        print(f"[Wallet] Provisioning failed (non-fatal): {e}")
+        logger.exception("[Wallet] provisioning failed (non-fatal) sub=%s role=%s error=%s", auth0_sub, role, str(e))
 
 
 def _get_bg_db():
@@ -421,21 +522,33 @@ async def update_role(
     background_tasks: BackgroundTasks,
     user: TokenData = Depends(get_current_user),
 ):
+    logger.info("[RoleUpdate] sub=%s requested_role=%s", user.sub, body.role)
     if body.role not in ("donor", "ngo"):
+        logger.warning("[RoleUpdate] invalid role=%s sub=%s", body.role, user.sub)
         raise HTTPException(status_code=400, detail="Role must be 'donor' or 'ngo'")
 
     # Save role immediately — do NOT wait for wallet creation
-    await db.users.update_one(
+    write_result = await db.users.update_one(
         {"auth0_sub": user.sub},
         {"$set": {"role": body.role}},
+    )
+    logger.info(
+        "[RoleUpdate] role persisted sub=%s matched=%s modified=%s",
+        user.sub,
+        write_result.matched_count,
+        write_result.modified_count,
     )
 
     # Provision wallet in the background after responding
     existing = await db.users.find_one({"auth0_sub": user.sub})
     if existing and not existing.get("wallet_address"):
+        logger.info("[RoleUpdate] scheduling wallet provisioning sub=%s role=%s", user.sub, body.role)
         background_tasks.add_task(_provision_wallet, user.sub, body.role)
+    else:
+        logger.info("[RoleUpdate] wallet already exists sub=%s", user.sub)
 
     doc = await db.users.find_one({"auth0_sub": user.sub})
+    logger.info("[RoleUpdate] complete sub=%s role=%s", user.sub, doc.get("role") if doc else None)
     return serialize(doc)
 
 @app.get("/api/users/me/wallet")
@@ -478,13 +591,17 @@ async def _ws_authenticate(websocket: WebSocket) -> bool:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
         data = json.loads(raw)
         token = data.get("token", "")
+        logger.info("[WS] auth handshake received path=%s token_len=%s", websocket.url.path, len(token))
         decode_token(token)   # raises HTTPException if invalid
+        logger.info("[WS] auth handshake success path=%s", websocket.url.path)
         return True
     except asyncio.TimeoutError:
+        logger.warning("[WS] auth timeout path=%s", websocket.url.path)
         await websocket.send_text(json.dumps({"error": "auth_timeout"}))
         await websocket.close(code=1008)
         return False
-    except Exception:
+    except Exception as e:
+        logger.warning("[WS] auth failed path=%s error=%s", websocket.url.path, str(e))
         await websocket.send_text(json.dumps({"error": "unauthorized"}))
         await websocket.close(code=1008)
         return False
