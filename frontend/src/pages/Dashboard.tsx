@@ -16,7 +16,7 @@ export default function Dashboard() {
     getCampaigns().then(setCampaigns).catch(() => {})
     if (user?.role === 'donor') getMyDonations().then(setDonations).catch(() => {})
     getPlatformAnalytics().then(s => setStats(s as Record<string, unknown>)).catch(() => {})
-  }, [user])
+  }, [user?.role])
 
   const totalDonated = donations.reduce((s, d) => s + d.amount_sol, 0)
   const totalReleased = donations.reduce((s, d) => s + d.released_sol, 0)

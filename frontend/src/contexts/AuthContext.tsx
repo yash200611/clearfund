@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { setTokenGetter, updateRole } from '@/api/client';
 
@@ -37,61 +37,92 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const getTokenSilentlyRef = useRef(getAccessTokenSilently);
+
+  const auth0Sub = auth0User?.sub ?? null;
+  const auth0Name = auth0User?.name ?? auth0User?.email ?? '';
+  const auth0Email = auth0User?.email ?? '';
+  const auth0Avatar = auth0User?.picture;
+  const tokenRole = (auth0User?.[ROLE_CLAIM] as AppUser['role']) ?? null;
+
+  useEffect(() => {
+    getTokenSilentlyRef.current = getAccessTokenSilently;
+  }, [getAccessTokenSilently]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      setTokenGetter(getAccessTokenSilently);
+      setTokenGetter(() => getTokenSilentlyRef.current());
     }
-  }, [isAuthenticated, getAccessTokenSilently]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!isAuthenticated || !auth0User) {
+    if (!isAuthenticated || !auth0Sub) {
       setAppUser(null);
       return;
     }
 
-    const u = auth0User;
+    const fallbackUser: AppUser = {
+      id: auth0Sub,
+      name: auth0Name,
+      email: auth0Email,
+      role: tokenRole,
+      avatar: auth0Avatar,
+    };
+
+    let cancelled = false;
+
     async function fetchProfile() {
       setProfileLoading(true);
       try {
-        const token = await getAccessTokenSilently();
+        const token = await getTokenSilentlyRef.current();
         const res = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const profile = await res.json();
-          setAppUser({
-            id: profile._id ?? profile.id ?? u.sub ?? '',
-            name: u.name ?? u.email ?? '',
-            email: u.email ?? '',
-            role: profile.role ?? (u[ROLE_CLAIM] as AppUser['role']) ?? null,
-            avatar: u.picture,
-            wallet_address: profile.wallet_address,
-          });
+          if (!cancelled) {
+            setAppUser(prev => ({
+              id: profile._id ?? profile.id ?? fallbackUser.id,
+              name: fallbackUser.name,
+              email: fallbackUser.email,
+              role: profile.role ?? prev?.role ?? fallbackUser.role,
+              avatar: fallbackUser.avatar,
+              wallet_address: profile.wallet_address ?? prev?.wallet_address,
+            }));
+          }
         } else {
-          setAppUser({
-            id: u.sub ?? '',
-            name: u.name ?? u.email ?? '',
-            email: u.email ?? '',
-            role: (u[ROLE_CLAIM] as AppUser['role']) ?? null,
-            avatar: u.picture,
-          });
+          if (!cancelled) {
+            setAppUser(prev => prev ? {
+              ...prev,
+              name: prev.name || fallbackUser.name,
+              email: prev.email || fallbackUser.email,
+              avatar: prev.avatar ?? fallbackUser.avatar,
+              role: prev.role ?? fallbackUser.role,
+            } : fallbackUser);
+          }
         }
       } catch {
-        setAppUser({
-          id: u.sub ?? '',
-          name: u.name ?? u.email ?? '',
-          email: u.email ?? '',
-          role: (u[ROLE_CLAIM] as AppUser['role']) ?? null,
-          avatar: u.picture,
-        });
+        if (!cancelled) {
+          setAppUser(prev => prev ? {
+            ...prev,
+            name: prev.name || fallbackUser.name,
+            email: prev.email || fallbackUser.email,
+            avatar: prev.avatar ?? fallbackUser.avatar,
+            role: prev.role ?? fallbackUser.role,
+          } : fallbackUser);
+        }
       } finally {
-        setProfileLoading(false);
+        if (!cancelled) {
+          setProfileLoading(false);
+        }
       }
     }
 
     fetchProfile();
-  }, [isAuthenticated, auth0User, getAccessTokenSilently]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, auth0Sub, auth0Name, auth0Email, auth0Avatar, tokenRole]);
 
   const login = useCallback((options?: { screen_hint?: string }) => {
     loginWithRedirect({

@@ -26,7 +26,13 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     ...(await authHeaders()),
     ...(opts.headers as Record<string, string> ?? {}),
   };
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  } catch {
+    const target = API_BASE || 'same-origin /api';
+    throw new Error(`Unable to reach backend (${target}). Start backend and verify VITE_API_URL.`);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? `Request failed: ${res.status}`);
