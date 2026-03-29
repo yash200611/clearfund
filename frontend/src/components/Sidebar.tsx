@@ -56,8 +56,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="h-full rounded-[1.6rem] border border-white/[0.14] bg-[linear-gradient(165deg,rgba(16,16,24,0.95),rgba(8,8,13,0.92))] backdrop-blur-xl shadow-[0_30px_45px_-34px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 h-16 border-b border-white/[0.1]">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-[linear-gradient(145deg,rgba(255,109,62,0.95),rgba(255,145,101,0.65))] flex items-center justify-center">
-                <Shield className="w-4 h-4 text-white" />
+              <div className="w-8 h-8 rounded-xl overflow-hidden flex items-center justify-center">
+                <img src="/favicon.ico" alt="Aidex" className="w-full h-full object-cover" />
               </div>
               <div>
                 <p className="cf-display text-white text-base leading-none">Aidex</p>
