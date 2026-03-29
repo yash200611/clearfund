@@ -488,9 +488,15 @@ async def get_me(user: TokenData = Depends(get_current_user)):
 # ─── Campaigns ───────────────────────────────────────────────────────────────
 
 @app.get("/api/campaigns")
-async def list_campaigns(request: Request):
+async def list_campaigns(
+    request: Request,
+    category: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+):
     viewer = _optional_user_from_request(request)
-    query = {"status": "active"}
+    public_statuses = ["active", "under_review"]
+    query_parts: list[dict] = []
 
     if viewer:
         viewer_doc = await db.users.find_one({"auth0_sub": viewer.sub}, {"role": 1})
@@ -500,8 +506,26 @@ async def list_campaigns(request: Request):
             if ngo_doc:
                 ngo_id = str(ngo_doc["_id"])
                 # NGO can see all of their own campaigns (including under_review/rejected),
-                # plus globally active campaigns.
-                query = {"$or": [{"status": "active"}, {"ngo_id": ngo_id}]}
+                # plus publicly visible campaigns.
+                query_parts.append({"$or": [{"status": {"$in": public_statuses}}, {"ngo_id": ngo_id}]})
+            else:
+                query_parts.append({"status": {"$in": public_statuses}})
+        else:
+            query_parts.append({"status": {"$in": public_statuses}})
+    else:
+        query_parts.append({"status": {"$in": public_statuses}})
+
+    if status and status != "All":
+        query_parts.append({"status": status})
+
+    if category and category != "All":
+        query_parts.append({"category": category})
+
+    if search:
+        rx = {"$regex": search, "$options": "i"}
+        query_parts.append({"$or": [{"title": rx}, {"description": rx}, {"ngo_name": rx}]})
+
+    query = query_parts[0] if len(query_parts) == 1 else {"$and": query_parts}
 
     cursor = db.campaigns.find(query).sort("created_at", -1)
     campaigns = []
@@ -583,6 +607,8 @@ async def create_donation(
     campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "active":
+        raise HTTPException(status_code=422, detail="Campaign is under review and not accepting donations yet")
 
     if body.amount_sol <= 0:
         raise HTTPException(status_code=400, detail="amount_sol must be greater than zero")
@@ -646,6 +672,8 @@ async def create_donation_from_transfer(
     campaign = await db.campaigns.find_one({"_id": ObjectId(body.campaign_id)})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "active":
+        raise HTTPException(status_code=422, detail="Campaign is under review and not accepting donations yet")
 
     vault_address = campaign.get("vault_address")
     if not vault_address:

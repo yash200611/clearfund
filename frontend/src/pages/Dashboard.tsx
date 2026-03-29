@@ -275,8 +275,9 @@ export default function Dashboard() {
             <CampaignCard
               key={c._id}
               campaign={c}
-              actionLabel={isDonor ? 'Invest' : undefined}
-              onAction={isDonor ? openInvest : undefined}
+              actionLabel={isDonor ? (c.status === 'active' ? 'Invest' : 'Under Review') : undefined}
+              onAction={isDonor && c.status === 'active' ? openInvest : undefined}
+              actionDisabled={c.status !== 'active'}
             />
           ))}
         </div>

@@ -84,13 +84,15 @@ export function CampaignCard({ campaign, actionLabel, onAction, actionDisabled =
           </div>
         </div>
 
-        {actionLabel && onAction && (
+        {actionLabel && (
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onAction(campaign)
+              if (onAction && !actionDisabled) {
+                onAction(campaign)
+              }
             }}
-            disabled={actionDisabled}
+            disabled={actionDisabled || !onAction}
             className="mt-4 w-full py-2.5 rounded-xl bg-[oklch(0.65_0.25_25)]/90 text-white text-sm font-semibold transition-all hover:bg-[oklch(0.65_0.25_25)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {actionLabel}
