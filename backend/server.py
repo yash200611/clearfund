@@ -59,7 +59,12 @@ lava_client: Optional[LavaClient] = None
 @app.on_event("startup")
 async def startup():
     global mongo_client, db, lava_client
-    mongo_client = AsyncIOMotorClient(MONGO_URL)
+    mongo_client = AsyncIOMotorClient(
+        MONGO_URL,
+        tls=True,
+        tlsAllowInvalidCertificates=False,
+        serverSelectionTimeoutMS=30000,
+    )
     db = mongo_client[DB_NAME]
     try:
         lava_client = LavaClient()

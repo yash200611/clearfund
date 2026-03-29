@@ -25,7 +25,12 @@ _client: _Optional[AsyncIOMotorClient] = None
 def _get_db():
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(MONGO_URL)
+        _client = AsyncIOMotorClient(
+            MONGO_URL,
+            tls=True,
+            tlsAllowInvalidCertificates=False,
+            serverSelectionTimeoutMS=30000,
+        )
     return _client[DB_NAME]
 
 
