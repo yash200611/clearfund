@@ -70,8 +70,12 @@ SOLANA_LOCAL_KEYPAIR_PATH = os.getenv("SOLANA_LOCAL_KEYPAIR_PATH", os.path.expan
 
 def _localnet_sign_and_send(from_address: str, to_address: str, amount_sol: float) -> str:
     """Sign and send a SOL transfer using the local keypair (localnet only)."""
-    with open(SOLANA_LOCAL_KEYPAIR_PATH) as f:
-        key_bytes = bytes(json.load(f))
+    keypair_json = os.getenv("SOLANA_LOCAL_KEYPAIR_JSON", "")
+    if keypair_json:
+        key_bytes = bytes(json.loads(keypair_json))
+    else:
+        with open(SOLANA_LOCAL_KEYPAIR_PATH) as f:
+            key_bytes = bytes(json.load(f))
     kp = Keypair.from_bytes(key_bytes)
     client = SolanaClient(SOLANA_RPC_URL)
     blockhash_resp = client.get_latest_blockhash()
