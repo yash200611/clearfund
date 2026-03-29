@@ -9,7 +9,7 @@ import { TrustBadge } from '@/components/TrustBadge'
 import { RiskBadge } from '@/components/RiskBadge'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { useAuth } from '@/contexts/AuthContext'
-import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer, signPrivyTransfer } from '@/api/client'
+import { getCampaignById, getMilestones, getCampaignActivity, donateTransfer, signTransfer } from '@/api/client'
 import type { Campaign, Milestone } from '@/api/client'
 import { transferSolToVault } from '@/lib/solanaTransfer'
 
@@ -62,7 +62,7 @@ export default function CampaignDetail() {
       let txExplorerUrl = ''
 
       if (user?.wallet_address) {
-        const tx = await signPrivyTransfer({
+        const tx = await signTransfer({
           campaign_id: id,
           amount_sol: sol,
         })

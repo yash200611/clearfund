@@ -22,7 +22,7 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { LiquidButton } from '@/components/ui/liquid-glass-button'
 import { CampaignCard } from '@/components/CampaignCard'
 import { useAuth } from '@/contexts/AuthContext'
-import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics, signPrivyTransfer } from '@/api/client'
+import { donateTransfer, getCampaigns, getMyDonations, getPlatformAnalytics, signTransfer } from '@/api/client'
 import type { Campaign, Donation } from '@/api/client'
 import { transferSolToVault } from '@/lib/solanaTransfer'
 
@@ -113,7 +113,7 @@ export default function Dashboard() {
       let txExplorerUrl = ''
 
       if (user?.wallet_address) {
-        const tx = await signPrivyTransfer({
+        const tx = await signTransfer({
           campaign_id: selectedCampaign._id,
           amount_sol: amountSol,
         })
