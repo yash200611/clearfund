@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -10,12 +11,24 @@ from jose import JWTError, jwt
 
 load_dotenv()
 
-AUTH0_DOMAIN = (
-    os.getenv("AUTH0_DOMAIN", "")
-    .replace("https://", "")
-    .replace("http://", "")
-    .strip("/")
-)
+def _normalize_auth0_domain(raw: str) -> str:
+    """
+    Accepts:
+    - dev-xxx.us.auth0.com
+    - https://dev-xxx.us.auth0.com
+    - https://dev-xxx.us.auth0.com/.well-known/jwks.json
+    and always returns host only.
+    """
+    value = (raw or "").strip().strip('"').strip("'")
+    if not value:
+        return ""
+
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = parsed.netloc or parsed.path
+    return host.split("/")[0].strip().lower()
+
+
+AUTH0_DOMAIN = _normalize_auth0_domain(os.getenv("AUTH0_DOMAIN", ""))
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 ALGORITHMS = ["RS256"]
 ROLE_CLAIM = "https://clearfund.app/role"
@@ -35,7 +48,14 @@ def get_jwks() -> dict:
         response = httpx.get(url, timeout=10)
         response.raise_for_status()
         return response.json()
-    except httpx.HTTPError:
+    except httpx.HTTPStatusError as e:
+        print(f"[Auth] JWKS HTTP error: status={e.response.status_code} url={url}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unable to fetch Auth0 JWKS (status {e.response.status_code})",
+        )
+    except httpx.RequestError as e:
+        print(f"[Auth] JWKS request error: {e.__class__.__name__}: {e} url={url}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to fetch Auth0 JWKS",
