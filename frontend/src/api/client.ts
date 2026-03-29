@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+// In production (Vercel), leave empty so requests go to the same origin and
+// are proxied to the backend via vercel.json rewrites.
+// In local dev, use VITE_API_URL (e.g. http://localhost:8000).
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 // Token getter — set by AuthContext after Auth0 authenticates
 let _getToken: (() => Promise<string>) | null = null;
