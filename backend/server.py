@@ -811,6 +811,54 @@ async def sign_privy_transfer(
     if not vault_address:
         raise HTTPException(status_code=422, detail="Campaign has no vault_address")
 
+    privy = PrivyClient()
+    # Leave room for network fee + minor rent fluctuations.
+    fee_buffer_sol = float(os.getenv("DONOR_TRANSFER_FEE_BUFFER_SOL", "0.005"))
+    required_sol = body.amount_sol + max(0.001, fee_buffer_sol)
+    current_balance: Optional[float] = None
+
+    try:
+        current_balance = await privy.get_wallet_balance(donor_wallet)
+    except Exception as e:
+        logger.warning(
+            "[PrivyTransfer] balance check failed donor_wallet=%s error=%s",
+            donor_wallet,
+            str(e),
+        )
+
+    if current_balance is not None and current_balance < required_sol:
+        attempted_airdrop = False
+        if SOLANA_NETWORK.lower() in ("devnet", "testnet"):
+            topup = max(1.0, round(required_sol - current_balance + 0.25, 3))
+            topup = min(topup, 5.0)
+            try:
+                airdrop_sig = await privy.request_airdrop(donor_wallet, sol=topup)
+                attempted_airdrop = True
+                logger.info(
+                    "[PrivyTransfer] auto-airdrop requested donor_wallet=%s amount_sol=%.3f sig=%s",
+                    donor_wallet,
+                    topup,
+                    airdrop_sig,
+                )
+                await asyncio.sleep(1.0)
+                current_balance = await privy.get_wallet_balance(donor_wallet)
+            except Exception as e:
+                logger.warning(
+                    "[PrivyTransfer] auto-airdrop failed donor_wallet=%s error=%s",
+                    donor_wallet,
+                    str(e),
+                )
+
+        if current_balance is not None and current_balance < required_sol:
+            suffix = " (auto-airdrop attempted but balance is still low)." if attempted_airdrop else "."
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Insufficient SOL in donor wallet. "
+                    f"balance={current_balance:.6f} SOL, required~={required_sol:.6f} SOL{suffix}"
+                ),
+            )
+
     try:
         executor = EscrowExecutor()
         tx_b64 = executor._build_transfer_tx(
@@ -832,7 +880,6 @@ async def sign_privy_transfer(
         )
 
     try:
-        privy = PrivyClient()
         signature = await privy.sign_and_send_transaction(privy_wallet_id, tx_b64)
     except httpx.TimeoutException:
         logger.warning(
@@ -842,6 +889,16 @@ async def sign_privy_transfer(
         )
         raise HTTPException(status_code=504, detail="Privy signing timed out")
     except Exception as e:
+        err_lower = str(e).lower()
+        if (
+            "transaction_broadcast_failure" in err_lower
+            or "attempt to debit an account" in err_lower
+            or "insufficient funds" in err_lower
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Insufficient SOL balance in donor wallet for transfer + fees",
+            )
         logger.exception(
             "[PrivyTransfer] signing failed donor=%s campaign_id=%s wallet_id=%s error=%s",
             str(donor_doc.get("_id")),
